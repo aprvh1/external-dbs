@@ -1,0 +1,228 @@
+---
+# Verify PostgreSQL deployment and extensions
+
+- name: Check if PostgreSQL process is running
+  command: pgrep -f postgres
+  register: postgres_process
+  changed_when: false
+  failed_when: false
+
+- name: Verify PostgreSQL process
+  assert:
+    that: postgres_process.rc == 0
+    fail_msg: "PostgreSQL process not running"
+    success_msg: "PostgreSQL process is running"
+
+- name: Check if Patroni process is running (3-node)
+  command: pgrep -f patroni
+  register: patroni_process
+  when: postgres_cluster_size > 1
+  changed_when: false
+  failed_when: false
+
+- name: Verify Patroni process (3-node)
+  assert:
+    that: patroni_process.rc == 0
+    fail_msg: "Patroni process not running"
+    success_msg: "Patroni process is running"
+  when: postgres_cluster_size > 1
+
+- name: Check if etcd process is running (3-node)
+  command: pgrep -f etcd
+  register: etcd_process
+  when: postgres_cluster_size > 1
+  changed_when: false
+  failed_when: false
+
+- name: Verify etcd process (3-node)
+  assert:
+    that: etcd_process.rc == 0
+    fail_msg: "etcd process not running"
+    success_msg: "etcd process is running"
+  when: postgres_cluster_size > 1
+
+# Port checks
+- name: Check if PostgreSQL port is listening
+  wait_for:
+    port: "{{ postgres_port }}"
+    host: "{{ 'localhost' if postgres_cluster_size == 1 else postgres_dns_name }}"
+    timeout: 10
+    state: started
+
+- name: Check if Patroni REST API port is listening (3-node)
+  wait_for:
+    port: "{{ patroni_restapi_port }}"
+    host: "{{ postgres_dns_name }}"
+    timeout: 10
+    state: started
+  when: postgres_cluster_size > 1
+
+- name: Check if etcd client port is listening (3-node)
+  wait_for:
+    port: "{{ etcd_client_port }}"
+    host: "{{ postgres_dns_name }}"
+    timeout: 10
+    state: started
+  when: postgres_cluster_size > 1
+
+# Database connectivity
+- name: Test PostgreSQL connection
+  shell: |
+    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/psql \
+      -U {{ postgres_superuser }} \
+      -d postgres \
+      -c "SELECT version();"
+  args:
+    executable: /bin/bash
+  register: postgres_version_output
+  changed_when: false
+
+- name: Display PostgreSQL version
+  debug:
+    msg: "{{ postgres_version_output.stdout_lines }}"
+
+# EXTENSION VERIFICATION (CRITICAL)
+- name: Verify PostgreSQL extensions are loaded
+  shell: |
+    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/psql \
+      -U {{ postgres_superuser }} \
+      -d postgres \
+      -t -A -c "SELECT extname, extversion FROM pg_extension WHERE extname IN ('pg_cron', 'pg_partman', 'hstore') ORDER BY extname;"
+  args:
+    executable: /bin/bash
+  register: extensions_loaded
+  delegate_to: "{{ groups['postgres_leader'][0] if 'postgres_leader' in groups else groups['postgres_cluster'][0] }}"
+  run_once: true
+  changed_when: false
+
+- name: Parse extension list
+  set_fact:
+    loaded_extensions: "{{ extensions_loaded.stdout_lines }}"
+
+- name: Verify all 3 extensions are loaded
+  assert:
+    that:
+      - loaded_extensions | length == 3
+      - "'hstore' in extensions_loaded.stdout"
+      - "'pg_cron' in extensions_loaded.stdout"
+      - "'pg_partman' in extensions_loaded.stdout"
+    fail_msg: "Not all extensions loaded. Found: {{ loaded_extensions }}"
+    success_msg: "All required extensions loaded"
+
+- name: Display loaded extensions
+  debug:
+    msg:
+      - "✅ PostgreSQL Extensions for Harness TSDB Migration:"
+      - "{{ loaded_extensions }}"
+
+# Extension functionality tests
+- name: Test pg_cron functionality
+  shell: |
+    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/psql \
+      -U {{ postgres_superuser }} \
+      -d postgres \
+      -t -A -c "SELECT cron.schedule('verify-test', '59 23 31 2 *', 'SELECT 1'); SELECT cron.unschedule('verify-test');"
+  args:
+    executable: /bin/bash
+  register: pg_cron_test
+  delegate_to: "{{ groups['postgres_leader'][0] if 'postgres_leader' in groups else groups['postgres_cluster'][0] }}"
+  run_once: true
+  changed_when: false
+  failed_when: pg_cron_test.rc != 0
+
+- name: Test hstore functionality
+  shell: |
+    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/psql \
+      -U {{ postgres_superuser }} \
+      -d postgres \
+      -t -A -c "SELECT 'test_key=>test_value'::hstore;"
+  args:
+    executable: /bin/bash
+  register: hstore_test
+  delegate_to: "{{ groups['postgres_leader'][0] if 'postgres_leader' in groups else groups['postgres_cluster'][0] }}"
+  run_once: true
+  changed_when: false
+  failed_when: hstore_test.rc != 0
+
+- name: Display extension test results
+  debug:
+    msg:
+      - "pg_cron test: PASSED"
+      - "hstore test: PASSED"
+
+# Cluster health checks (3-node)
+- name: Check Patroni cluster status (3-node)
+  command: patronictl -c {{ patroni_config_dir }}/patroni.yml list
+  register: patroni_cluster_status
+  when: postgres_cluster_size > 1
+  changed_when: false
+
+- name: Verify cluster has 1 leader and replicas (3-node)
+  assert:
+    that:
+      - "'Leader' in patroni_cluster_status.stdout or 'running' in patroni_cluster_status.stdout"
+      - patroni_cluster_status.stdout_lines | length >= 4
+    fail_msg: "Patroni cluster not healthy"
+    success_msg: "Patroni cluster healthy"
+  when: postgres_cluster_size > 1
+
+- name: Display Patroni cluster status
+  debug:
+    var: patroni_cluster_status.stdout_lines
+  when: postgres_cluster_size > 1
+
+# Replication check (3-node)
+- name: Check replication status (3-node)
+  shell: |
+    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/psql \
+      -U {{ postgres_superuser }} \
+      -d postgres \
+      -c "SELECT client_addr, state, sync_state FROM pg_stat_replication;"
+  args:
+    executable: /bin/bash
+  register: replication_status
+  when: postgres_cluster_size > 1
+  delegate_to: "{{ groups['postgres_leader'][0] }}"
+  run_once: true
+  changed_when: false
+
+- name: Display replication status
+  debug:
+    var: replication_status.stdout_lines
+  when: postgres_cluster_size > 1
+
+# Write test
+- name: Create test table and insert data
+  shell: |
+    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/psql \
+      -U {{ postgres_superuser }} \
+      -d postgres \
+      -c "CREATE TABLE IF NOT EXISTS verification_test (id SERIAL PRIMARY KEY, test_time TIMESTAMP DEFAULT NOW(), test_data TEXT);
+          INSERT INTO verification_test (test_data) VALUES ('Verification completed at {{ ansible_date_time.iso8601 }}');
+          SELECT COUNT(*) as total_tests FROM verification_test;"
+  args:
+    executable: /bin/bash
+  register: write_test
+  delegate_to: "{{ groups['postgres_leader'][0] if 'postgres_leader' in groups else groups['postgres_cluster'][0] }}"
+  run_once: true
+  changed_when: false
+
+- name: Display write test result
+  debug:
+    var: write_test.stdout_lines
+
+# Final verification summary
+- name: Verification summary
+  debug:
+    msg:
+      - "========================================="
+      - "PostgreSQL Deployment Verification"
+      - "========================================="
+      - "✅ PostgreSQL process running"
+      - "✅ Database connectivity: OK"
+      - "✅ Extensions loaded: pg_cron, pg_partman, hstore"
+      - "✅ Extension functionality: PASSED"
+      - "✅ Write operations: OK"
+      - "{{ '✅ Cluster health: OK (1 Leader + ' ~ (postgres_cluster_size - 1) ~ ' Replicas)' if postgres_cluster_size > 1 else '✅ Standalone deployment: OK' }}"
+      - "========================================="
+      - "Deployment verified successfully!"

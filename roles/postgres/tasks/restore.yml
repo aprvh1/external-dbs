@@ -1,0 +1,104 @@
+---
+# Restore PostgreSQL from backup
+
+- name: Check if restore path is specified
+  assert:
+    that: postgres_restore_backup_path | length > 0
+    fail_msg: "postgres_restore_backup_path not specified"
+    success_msg: "Restore path: {{ postgres_restore_backup_path }}"
+
+- name: Verify backup path exists
+  stat:
+    path: "{{ postgres_restore_backup_path }}"
+  register: backup_path_check
+  delegate_to: localhost
+
+- name: Assert backup exists
+  assert:
+    that: backup_path_check.stat.exists
+    fail_msg: "Backup not found at {{ postgres_restore_backup_path }}"
+
+- name: Stop PostgreSQL/Patroni services
+  systemd:
+    name: "{{ 'postgresql' if postgres_cluster_size == 1 else 'patroni' }}"
+    state: stopped
+  when: ansible_service_mgr == "systemd"
+
+- name: Backup current data directory
+  command: >
+    mv {{ postgres_data_dir }} {{ postgres_data_dir }}.backup-{{ ansible_date_time.epoch }}
+  args:
+    creates: "{{ postgres_data_dir }}.backup-{{ ansible_date_time.epoch }}"
+  when: backup_path_check.stat.exists
+
+- name: Create fresh data directory
+  file:
+    path: "{{ postgres_data_dir }}"
+    state: directory
+    owner: "{{ postgres_user }}"
+    group: "{{ postgres_group }}"
+    mode: '0700'
+
+# Physical restore (pg_basebackup)
+- name: Restore from pg_basebackup (physical)
+  synchronize:
+    src: "{{ postgres_restore_backup_path }}/"
+    dest: "{{ postgres_data_dir }}/"
+  delegate_to: "{{ groups['postgres_leader'][0] if 'postgres_leader' in groups else groups['postgres_cluster'][0] }}"
+  when: postgres_restore_type == "basebackup"
+
+- name: Set ownership on restored data
+  file:
+    path: "{{ postgres_data_dir }}"
+    owner: "{{ postgres_user }}"
+    group: "{{ postgres_group }}"
+    recurse: yes
+
+- name: Start PostgreSQL/Patroni services after restore
+  systemd:
+    name: "{{ 'postgresql' if postgres_cluster_size == 1 else 'patroni' }}"
+    state: started
+
+- name: Wait for PostgreSQL to be ready after restore
+  wait_for:
+    port: "{{ postgres_port }}"
+    host: "{{ 'localhost' if postgres_cluster_size == 1 else postgres_dns_name }}"
+    timeout: 120
+    delay: 5
+
+# Re-initialize extensions after restore (CRITICAL)
+- name: Re-initialize extensions after restore
+  include_tasks: initialization.yml
+  when: postgres_extensions_enabled | bool
+
+- name: Verify extensions after restore
+  shell: |
+    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/psql \
+      -U {{ postgres_superuser }} \
+      -d postgres \
+      -t -A -c "SELECT extname, extversion FROM pg_extension WHERE extname IN ('pg_cron', 'pg_partman', 'hstore') ORDER BY extname;"
+  args:
+    executable: /bin/bash
+  register: extensions_after_restore
+  delegate_to: "{{ groups['postgres_leader'][0] if 'postgres_leader' in groups else groups['postgres_cluster'][0] }}"
+  run_once: true
+  changed_when: false
+
+- name: Verify all extensions present after restore
+  assert:
+    that:
+      - extensions_after_restore.stdout_lines | length == 3
+      - "'pg_cron' in extensions_after_restore.stdout"
+      - "'pg_partman' in extensions_after_restore.stdout"
+      - "'hstore' in extensions_after_restore.stdout"
+    fail_msg: "Extensions missing after restore!"
+    success_msg: "All extensions present after restore"
+
+- name: Display restore summary
+  debug:
+    msg:
+      - "Restore completed successfully"
+      - "Backup source: {{ postgres_restore_backup_path }}"
+      - "Restore type: {{ postgres_restore_type }}"
+      - "Extensions verified: {{ extensions_after_restore.stdout_lines }}"
+      - "Original data backed up to: {{ postgres_data_dir }}.backup-{{ ansible_date_time.epoch }}"

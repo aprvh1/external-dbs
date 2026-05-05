@@ -1,0 +1,32 @@
+[Unit]
+Description=etcd - distributed key-value store
+Documentation=https://etcd.io/docs/
+After=network.target
+
+[Service]
+Type=notify
+User={{ etcd_user }}
+Group={{ etcd_group }}
+
+Environment=ETCD_DATA_DIR={{ etcd_data_dir }}
+EnvironmentFile=-/etc/etcd/etcd.conf
+
+ExecStart=/usr/local/bin/etcd \
+  --name={{ ansible_hostname }} \
+  --data-dir={{ etcd_data_dir }} \
+  --listen-peer-urls=http://{{ postgres_dns_name }}:{{ etcd_peer_port }} \
+  --listen-client-urls=http://{{ postgres_dns_name }}:{{ etcd_client_port }},http://127.0.0.1:{{ etcd_client_port }} \
+  --initial-advertise-peer-urls=http://{{ postgres_dns_name }}:{{ etcd_peer_port }} \
+  --advertise-client-urls=http://{{ postgres_dns_name }}:{{ etcd_client_port }} \
+  --initial-cluster={{ groups['postgres_cluster'] | map('extract', hostvars, 'ansible_hostname') | zip(groups['postgres_cluster'] | map('extract', hostvars, 'postgres_dns_name')) | map('join', '=http://') | map('regex_replace', '$', ':' ~ etcd_peer_port) | join(',') }} \
+  --initial-cluster-state=new \
+  --initial-cluster-token={{ patroni_scope }}-etcd
+
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=0
+
+LimitNOFILE=40000
+
+[Install]
+WantedBy=multi-user.target

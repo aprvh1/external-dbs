@@ -1,0 +1,112 @@
+---
+# Install PostgreSQL extensions for Harness TSDB migration
+# Compiles pg_cron and pg_partman from source
+# hstore is built-in (installed via contrib)
+
+- name: Check if pg_cron extension is already installed
+  stat:
+    path: "{{ postgres_install_dir }}/lib/pg_cron.so"
+  register: pg_cron_installed
+
+- name: Check if pg_partman extension is already installed
+  stat:
+    path: "{{ postgres_install_dir }}/lib/pg_partman_bgw.so"
+  register: pg_partman_installed
+
+- name: Check if hstore extension is already installed
+  stat:
+    path: "{{ postgres_install_dir }}/lib/hstore.so"
+  register: hstore_installed
+
+- name: Display extension installation status
+  debug:
+    msg:
+      - "pg_cron installed: {{ pg_cron_installed.stat.exists }}"
+      - "pg_partman installed: {{ pg_partman_installed.stat.exists }}"
+      - "hstore installed: {{ hstore_installed.stat.exists }}"
+
+# Install extension build dependencies
+- name: Install extension build dependencies
+  apt:
+    name: "{{ postgres_extension_build_deps }}"
+    state: present
+    update_cache: yes
+  when: not (pg_cron_installed.stat.exists and pg_partman_installed.stat.exists)
+
+# Compile and install pg_cron
+- name: Extract pg_cron source
+  unarchive:
+    src: "{{ role_path }}/files/extension-sources/{{ postgres_extensions.pg_cron.tarball }}"
+    dest: "/tmp/"
+    remote_src: no
+  when: not pg_cron_installed.stat.exists
+
+- name: Compile and install pg_cron
+  shell: |
+    cd /tmp/pg_cron-{{ postgres_extensions.pg_cron.version }}
+    export PATH={{ postgres_bin_dir }}:$PATH
+    export PG_CONFIG={{ postgres_bin_dir }}/pg_config
+    make clean || true
+    make
+    make install
+  args:
+    executable: /bin/bash
+  when: not pg_cron_installed.stat.exists
+  register: pg_cron_compile
+
+- name: Verify pg_cron.so installed
+  stat:
+    path: "{{ postgres_install_dir }}/lib/pg_cron.so"
+  register: pg_cron_verify
+  failed_when: not pg_cron_verify.stat.exists
+
+# Compile and install pg_partman
+- name: Extract pg_partman source
+  unarchive:
+    src: "{{ role_path }}/files/extension-sources/{{ postgres_extensions.pg_partman.tarball }}"
+    dest: "/tmp/"
+    remote_src: no
+  when: not pg_partman_installed.stat.exists
+
+- name: Compile and install pg_partman
+  shell: |
+    cd /tmp/pg_partman-{{ postgres_extensions.pg_partman.version }}
+    export PATH={{ postgres_bin_dir }}:$PATH
+    export PG_CONFIG={{ postgres_bin_dir }}/pg_config
+    make clean || true
+    make
+    make install
+  args:
+    executable: /bin/bash
+  when: not pg_partman_installed.stat.exists
+  register: pg_partman_compile
+
+- name: Verify pg_partman_bgw.so installed
+  stat:
+    path: "{{ postgres_install_dir }}/lib/pg_partman_bgw.so"
+  register: pg_partman_verify
+  failed_when: not pg_partman_verify.stat.exists
+
+# Verify hstore (built-in contrib module)
+- name: Verify hstore.so exists (built-in)
+  stat:
+    path: "{{ postgres_install_dir }}/lib/hstore.so"
+  register: hstore_verify
+  failed_when: not hstore_verify.stat.exists
+
+- name: Cleanup extension source directories
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "/tmp/pg_cron-{{ postgres_extensions.pg_cron.version }}"
+    - "/tmp/pg_partman-{{ postgres_extensions.pg_partman.version }}"
+  when: pg_cron_compile.changed or pg_partman_compile.changed
+
+- name: Display extension installation summary
+  debug:
+    msg:
+      - "Extension installation complete"
+      - "pg_cron: {{ postgres_install_dir }}/lib/pg_cron.so"
+      - "pg_partman: {{ postgres_install_dir }}/lib/pg_partman_bgw.so"
+      - "hstore: {{ postgres_install_dir }}/lib/hstore.so"

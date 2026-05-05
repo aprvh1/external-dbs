@@ -1,0 +1,106 @@
+---
+# Start and manage PostgreSQL/Patroni/etcd services
+
+# Service management for 1-node standalone
+- name: Start and enable PostgreSQL service (1-node)
+  systemd:
+    name: postgresql
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  when: postgres_cluster_size == 1
+
+- name: Wait for PostgreSQL to be ready (1-node)
+  wait_for:
+    port: "{{ postgres_port }}"
+    host: localhost
+    timeout: 60
+    delay: 2
+  when: postgres_cluster_size == 1
+
+- name: Create replication user (1-node, for future scaling)
+  shell: |
+    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/psql \
+      -U {{ postgres_superuser }} \
+      -d postgres \
+      -c "CREATE USER {{ postgres_replication_user }} WITH REPLICATION PASSWORD '{{ postgres_replication_password }}';"
+  args:
+    executable: /bin/bash
+  when: postgres_cluster_size == 1
+  register: create_repl_user
+  failed_when: create_repl_user.rc != 0 and 'already exists' not in create_repl_user.stderr
+  changed_when: "'CREATE ROLE' in create_repl_user.stdout"
+
+# Service management for 3-node HA cluster
+- name: Start and enable etcd service (3-node)
+  systemd:
+    name: etcd
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  when: postgres_cluster_size > 1
+
+- name: Wait for etcd to be ready
+  wait_for:
+    port: "{{ etcd_client_port }}"
+    host: "{{ postgres_dns_name }}"
+    timeout: 60
+    delay: 2
+  when: postgres_cluster_size > 1
+
+- name: Wait for etcd cluster formation
+  command: etcdctl --endpoints=http://localhost:{{ etcd_client_port }} member list
+  register: etcd_members
+  retries: 10
+  delay: 5
+  until: etcd_members.rc == 0
+  when: postgres_cluster_size > 1
+  changed_when: false
+
+- name: Display etcd cluster members
+  debug:
+    var: etcd_members.stdout_lines
+  when: postgres_cluster_size > 1
+
+- name: Start and enable Patroni service (3-node)
+  systemd:
+    name: patroni
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  when: postgres_cluster_size > 1
+
+- name: Wait for Patroni REST API to be ready
+  wait_for:
+    port: "{{ patroni_restapi_port }}"
+    host: "{{ postgres_dns_name }}"
+    timeout: 120
+    delay: 5
+  when: postgres_cluster_size > 1
+
+- name: Wait for Patroni cluster initialization
+  pause:
+    seconds: 30
+    prompt: "Waiting for Patroni to initialize PostgreSQL cluster"
+  when: postgres_cluster_size > 1
+
+- name: Check Patroni cluster status
+  command: patronictl -c {{ patroni_config_dir }}/patroni.yml list
+  register: patroni_status
+  retries: 10
+  delay: 10
+  until: patroni_status.rc == 0 and 'running' in patroni_status.stdout
+  when: postgres_cluster_size > 1
+  changed_when: false
+
+- name: Display Patroni cluster status
+  debug:
+    var: patroni_status.stdout_lines
+  when: postgres_cluster_size > 1
+
+- name: Service startup summary
+  debug:
+    msg:
+      - "Services started successfully"
+      - "Cluster size: {{ postgres_cluster_size }} node(s)"
+      - "Mode: {{ 'Standalone PostgreSQL' if postgres_cluster_size == 1 else 'HA with Patroni + etcd' }}"

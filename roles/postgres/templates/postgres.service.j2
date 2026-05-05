@@ -1,0 +1,22 @@
+[Unit]
+Description=PostgreSQL Database Server
+Documentation=https://www.postgresql.org/docs/14/
+After=network.target
+
+[Service]
+Type=notify
+User={{ postgres_user }}
+Group={{ postgres_group }}
+
+Environment=PGDATA={{ postgres_data_dir }}
+Environment=PG_OOM_ADJUST_FILE=/proc/self/oom_score_adj
+Environment=PG_OOM_ADJUST_VALUE=0
+
+ExecStart={{ postgres_bin_dir }}/postgres -D {{ postgres_data_dir }}
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGINT
+TimeoutSec=0
+
+[Install]
+WantedBy=multi-user.target

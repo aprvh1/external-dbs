@@ -1,0 +1,158 @@
+---
+# Install PostgreSQL from source with compilation
+
+- name: Check if PostgreSQL is already installed
+  stat:
+    path: "{{ postgres_bin_dir }}/postgres"
+  register: postgres_binary
+
+- name: Get installed PostgreSQL version
+  command: "{{ postgres_bin_dir }}/postgres --version"
+  register: postgres_version_check
+  when: postgres_binary.stat.exists
+  changed_when: false
+  failed_when: false
+
+- name: Display current PostgreSQL status
+  debug:
+    msg: "PostgreSQL already installed: {{ postgres_binary.stat.exists }}"
+
+- name: Install PostgreSQL build dependencies
+  apt:
+    name: "{{ postgres_build_deps }}"
+    state: present
+    update_cache: yes
+  when: not postgres_binary.stat.exists or postgres_version not in postgres_version_check.stdout
+
+- name: Create postgres system group
+  group:
+    name: "{{ postgres_group }}"
+    gid: "{{ postgres_gid }}"
+    system: yes
+    state: present
+
+- name: Create postgres system user
+  user:
+    name: "{{ postgres_user }}"
+    uid: "{{ postgres_uid }}"
+    group: "{{ postgres_group }}"
+    system: yes
+    shell: /bin/bash
+    home: "{{ postgres_data_dir | dirname }}"
+    comment: "PostgreSQL Server"
+    state: present
+
+- name: Create PostgreSQL directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ postgres_user }}"
+    group: "{{ postgres_group }}"
+    mode: '0755'
+  loop:
+    - "{{ postgres_data_dir | dirname }}"
+    - "{{ postgres_log_dir }}"
+    - "{{ postgres_config_dir }}"
+    - /var/run/postgresql
+
+- name: Extract PostgreSQL source tarball
+  unarchive:
+    src: "{{ role_path }}/files/postgres-binaries/{{ postgres_tarball }}"
+    dest: /tmp/
+    remote_src: no
+  when: not postgres_binary.stat.exists or postgres_version not in postgres_version_check.stdout
+
+- name: Configure PostgreSQL source
+  command: >
+    ./configure
+    --prefix={{ postgres_install_dir }}
+    --with-python
+    --with-openssl
+    --with-libxml
+    --with-readline
+  args:
+    chdir: "/tmp/postgresql-{{ postgres_version }}"
+  when: not postgres_binary.stat.exists or postgres_version not in postgres_version_check.stdout
+  register: postgres_configure
+
+- name: Compile PostgreSQL
+  command: make -j{{ ansible_processor_vcpus }}
+  args:
+    chdir: "/tmp/postgresql-{{ postgres_version }}"
+  when: postgres_configure.changed
+  register: postgres_compile
+
+- name: Install PostgreSQL
+  command: make install
+  args:
+    chdir: "/tmp/postgresql-{{ postgres_version }}"
+  become: yes
+  when: postgres_compile.changed
+
+- name: Install PostgreSQL contrib modules (includes hstore)
+  command: make install
+  args:
+    chdir: "/tmp/postgresql-{{ postgres_version }}/contrib"
+  become: yes
+  when: postgres_compile.changed
+
+- name: Create symlinks for PostgreSQL binaries
+  file:
+    src: "{{ postgres_bin_dir }}/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+    force: yes
+  loop:
+    - postgres
+    - psql
+    - pg_ctl
+    - pg_dump
+    - pg_restore
+    - pg_basebackup
+    - initdb
+    - createdb
+    - dropdb
+    - createuser
+    - dropuser
+    - pg_config
+
+- name: Initialize PostgreSQL data directory (1-node only)
+  command: >
+    {{ postgres_bin_dir }}/initdb
+    -D {{ postgres_data_dir }}
+    --encoding=UTF8
+    --locale=en_US.UTF-8
+    --data-checksums
+  become: yes
+  become_user: "{{ postgres_user }}"
+  when:
+    - postgres_cluster_size == 1
+    - not postgres_binary.stat.exists
+  register: postgres_initdb
+
+- name: Set ownership of PostgreSQL directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ postgres_user }}"
+    group: "{{ postgres_group }}"
+    recurse: yes
+  loop:
+    - "{{ postgres_install_dir }}"
+    - "{{ postgres_data_dir | dirname }}"
+    - "{{ postgres_log_dir }}"
+
+- name: Cleanup PostgreSQL source directory
+  file:
+    path: "/tmp/postgresql-{{ postgres_version }}"
+    state: absent
+  when: postgres_compile.changed
+
+- name: Verify PostgreSQL installation
+  command: "{{ postgres_bin_dir }}/postgres --version"
+  register: postgres_verify
+  changed_when: false
+
+- name: Display PostgreSQL version
+  debug:
+    msg: "PostgreSQL installed: {{ postgres_verify.stdout }}"

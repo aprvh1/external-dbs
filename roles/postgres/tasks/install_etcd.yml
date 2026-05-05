@@ -1,0 +1,86 @@
+---
+# Install etcd for 3-node HA cluster
+
+- name: Check if etcd is already installed
+  stat:
+    path: /usr/local/bin/etcd
+  register: etcd_binary
+
+- name: Get installed etcd version
+  command: /usr/local/bin/etcd --version
+  register: etcd_version_check
+  when: etcd_binary.stat.exists
+  changed_when: false
+  failed_when: false
+
+- name: Display current etcd status
+  debug:
+    msg: "etcd already installed: {{ etcd_binary.stat.exists }}"
+
+- name: Create etcd system group
+  group:
+    name: "{{ etcd_group }}"
+    system: yes
+    state: present
+
+- name: Create etcd system user
+  user:
+    name: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    system: yes
+    shell: /bin/false
+    home: "{{ etcd_data_dir }}"
+    comment: "etcd Service Account"
+    state: present
+
+- name: Create etcd data directory
+  file:
+    path: "{{ etcd_data_dir }}"
+    state: directory
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: '0750'
+
+- name: Extract etcd tarball
+  unarchive:
+    src: "{{ role_path }}/files/etcd-binaries/{{ etcd_tarball }}"
+    dest: /tmp/
+    remote_src: no
+  when: not etcd_binary.stat.exists or etcd_version not in etcd_version_check.stdout
+
+- name: Copy etcd binaries to /usr/local/bin
+  copy:
+    src: "/tmp/etcd-v{{ etcd_version }}-linux-amd64/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    owner: root
+    group: root
+    mode: '0755'
+    remote_src: yes
+  loop:
+    - etcd
+    - etcdctl
+  when: not etcd_binary.stat.exists or etcd_version not in etcd_version_check.stdout
+
+- name: Cleanup etcd extraction directory
+  file:
+    path: "/tmp/etcd-v{{ etcd_version }}-linux-amd64"
+    state: absent
+
+- name: Deploy etcd systemd service file
+  template:
+    src: etcd.service.j2
+    dest: "{{ postgres_systemd_dir }}/etcd.service"
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+
+- name: Verify etcd installation
+  command: /usr/local/bin/etcd --version
+  register: etcd_verify
+  changed_when: false
+
+- name: Display etcd version
+  debug:
+    msg: "etcd installed: {{ etcd_verify.stdout_lines[0] }}"

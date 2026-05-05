@@ -1,0 +1,92 @@
+---
+# Preflight checks for PostgreSQL deployment
+
+- name: Check OS compatibility
+  assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_version in ["20.04", "22.04"]
+    fail_msg: "This role only supports Ubuntu 20.04 or 22.04"
+    success_msg: "OS compatibility verified: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+- name: Check disk space for data directory
+  assert:
+    that:
+      - ansible_mounts | selectattr('mount', 'equalto', '/') | map(attribute='size_available') | first > 53687091200
+    fail_msg: "Insufficient disk space. Need at least 50GB free"
+    success_msg: "Sufficient disk space available"
+
+- name: Check if required ports are available
+  wait_for:
+    port: "{{ item }}"
+    state: stopped
+    timeout: 5
+  loop:
+    - "{{ postgres_port }}"
+    - "{{ patroni_restapi_port if postgres_cluster_size > 1 else postgres_port }}"
+    - "{{ etcd_client_port if postgres_cluster_size > 1 else postgres_port }}"
+    - "{{ etcd_peer_port if postgres_cluster_size > 1 else postgres_port }}"
+  ignore_errors: yes
+  register: port_check
+
+- name: Verify DNS resolution for cluster members
+  command: "getent hosts {{ hostvars[item]['postgres_dns_name'] }}"
+  loop: "{{ groups['postgres_cluster'] }}"
+  when: postgres_cluster_size > 1
+  changed_when: false
+
+- name: Check if PostgreSQL source tarball exists
+  stat:
+    path: "{{ role_path }}/files/postgres-binaries/{{ postgres_tarball }}"
+  register: postgres_tarball_check
+  delegate_to: localhost
+
+- name: Verify PostgreSQL source tarball
+  assert:
+    that:
+      - postgres_tarball_check.stat.exists
+    fail_msg: "PostgreSQL tarball not found: {{ postgres_tarball }}"
+    success_msg: "PostgreSQL tarball found"
+
+- name: Check if extension source tarballs exist (pg_cron, pg_partman)
+  stat:
+    path: "{{ role_path }}/files/extension-sources/{{ item.value.tarball }}"
+  loop: "{{ postgres_extensions | dict2items }}"
+  when:
+    - postgres_extensions_enabled | bool
+    - not item.value.builtin | default(false)
+  register: extension_tarball_check
+  delegate_to: localhost
+
+- name: Verify extension tarballs
+  assert:
+    that:
+      - item.stat.exists
+    fail_msg: "Extension tarball not found: {{ item.item.value.tarball }}"
+  loop: "{{ extension_tarball_check.results }}"
+  when:
+    - postgres_extensions_enabled | bool
+    - not item.skipped | default(false)
+
+- name: Check etcd binary (3-node only)
+  stat:
+    path: "{{ role_path }}/files/etcd-binaries/{{ etcd_tarball }}"
+  register: etcd_tarball_check
+  when: postgres_cluster_size > 1
+  delegate_to: localhost
+
+- name: Verify etcd binary
+  assert:
+    that:
+      - etcd_tarball_check.stat.exists
+    fail_msg: "etcd tarball not found: {{ etcd_tarball }}"
+  when: postgres_cluster_size > 1
+
+- name: Display preflight summary
+  debug:
+    msg:
+      - "Preflight checks passed"
+      - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+      - "Cluster size: {{ postgres_cluster_size }} node(s)"
+      - "Extensions enabled: {{ postgres_extensions_enabled }}"
+      - "PostgreSQL version: {{ postgres_version }}"

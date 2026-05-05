@@ -1,0 +1,107 @@
+---
+# Initialize PostgreSQL extensions via SQL
+# Runs after PostgreSQL is started and ready
+
+- name: Wait for PostgreSQL to be ready
+  wait_for:
+    port: "{{ postgres_port }}"
+    host: "{{ postgres_dns_name if postgres_cluster_size > 1 else 'localhost' }}"
+    timeout: 300
+    delay: 5
+
+- name: Identify leader/primary node
+  set_fact:
+    postgres_leader_node: "{{ groups['postgres_leader'][0] if 'postgres_leader' in groups else groups['postgres_cluster'][0] }}"
+
+- name: Deploy extension initialization SQL script
+  template:
+    src: init-extensions.sql.j2
+    dest: /tmp/init-extensions.sql
+    owner: "{{ postgres_user }}"
+    group: "{{ postgres_group }}"
+    mode: '0644'
+  delegate_to: "{{ postgres_leader_node }}"
+  run_once: true
+
+- name: Execute extension initialization SQL
+  shell: |
+    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/psql \
+      -U {{ postgres_superuser }} \
+      -d postgres \
+      -f /tmp/init-extensions.sql
+  args:
+    executable: /bin/bash
+  register: extension_init
+  delegate_to: "{{ postgres_leader_node }}"
+  run_once: true
+  changed_when: "'CREATE EXTENSION' in extension_init.stdout"
+
+- name: Display extension initialization output
+  debug:
+    var: extension_init.stdout_lines
+  when: extension_init.stdout_lines is defined
+
+- name: Verify extensions are loaded
+  shell: |
+    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/psql \
+      -U {{ postgres_superuser }} \
+      -d postgres \
+      -t -A -c "SELECT extname, extversion FROM pg_extension WHERE extname IN ('pg_cron', 'pg_partman', 'hstore') ORDER BY extname;"
+  args:
+    executable: /bin/bash
+  register: loaded_extensions
+  delegate_to: "{{ postgres_leader_node }}"
+  run_once: true
+  changed_when: false
+
+- name: Parse loaded extensions
+  set_fact:
+    extension_list: "{{ loaded_extensions.stdout_lines }}"
+
+- name: Verify all 3 extensions are loaded
+  assert:
+    that:
+      - extension_list | length == 3
+      - "'hstore' in loaded_extensions.stdout"
+      - "'pg_cron' in loaded_extensions.stdout"
+      - "'pg_partman' in loaded_extensions.stdout"
+    fail_msg: "Not all extensions loaded. Found: {{ extension_list }}"
+    success_msg: "All 3 extensions loaded successfully"
+
+- name: Display loaded extensions
+  debug:
+    msg:
+      - "Loaded PostgreSQL extensions:"
+      - "{{ extension_list }}"
+
+- name: Cleanup SQL script
+  file:
+    path: /tmp/init-extensions.sql
+    state: absent
+  delegate_to: "{{ postgres_leader_node }}"
+  run_once: true
+
+- name: Test pg_cron functionality
+  shell: |
+    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/psql \
+      -U {{ postgres_superuser }} \
+      -d postgres \
+      -t -A -c "SELECT cron.schedule('ansible-test', '59 23 31 2 *', 'SELECT 1'); SELECT cron.unschedule('ansible-test');"
+  args:
+    executable: /bin/bash
+  register: pg_cron_test
+  delegate_to: "{{ postgres_leader_node }}"
+  run_once: true
+  changed_when: false
+
+- name: Display pg_cron test result
+  debug:
+    msg: "pg_cron test successful: {{ pg_cron_test.stdout }}"
+
+- name: Extension initialization complete
+  debug:
+    msg:
+      - "PostgreSQL extensions for Harness TSDB migration initialized"
+      - "pg_cron v{{ postgres_extensions.pg_cron.version }} - READY"
+      - "pg_partman v{{ postgres_extensions.pg_partman.version }} - READY"
+      - "hstore v{{ postgres_extensions.hstore.version }} - READY"

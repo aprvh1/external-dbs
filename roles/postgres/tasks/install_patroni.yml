@@ -1,0 +1,67 @@
+---
+# Install Patroni for 3-node HA cluster
+
+- name: Check if Patroni is already installed
+  command: patronictl version
+  register: patroni_version_check
+  changed_when: false
+  failed_when: false
+
+- name: Display current Patroni status
+  debug:
+    msg: "Patroni installed: {{ patroni_version_check.rc == 0 }}"
+
+- name: Install Python3 and pip
+  apt:
+    name:
+      - python3
+      - python3-pip
+      - python3-dev
+    state: present
+    update_cache: yes
+
+- name: Install Patroni and dependencies from local packages
+  shell: |
+    pip3 install --no-index --find-links={{ role_path }}/files/patroni-packages/ \
+      patroni[etcd3] \
+      psycopg2-binary \
+      python-etcd3
+  args:
+    executable: /bin/bash
+  when: patroni_version_check.rc != 0
+  register: patroni_install
+
+- name: Create Patroni configuration directory
+  file:
+    path: "{{ patroni_config_dir }}"
+    state: directory
+    owner: "{{ postgres_user }}"
+    group: "{{ postgres_group }}"
+    mode: '0750'
+
+- name: Deploy Patroni systemd service file
+  template:
+    src: patroni.service.j2
+    dest: "{{ postgres_systemd_dir }}/patroni.service"
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+
+- name: Create Patroni log directory
+  file:
+    path: /var/log/patroni
+    state: directory
+    owner: "{{ postgres_user }}"
+    group: "{{ postgres_group }}"
+    mode: '0755'
+
+- name: Verify Patroni installation
+  command: patronictl version
+  register: patroni_verify
+  changed_when: false
+
+- name: Display Patroni version
+  debug:
+    msg: "Patroni installed: {{ patroni_verify.stdout }}"

@@ -1,0 +1,39 @@
+---
+# Configure PostgreSQL for 1-node standalone deployment
+
+- name: Deploy postgresql.conf
+  template:
+    src: postgresql.conf.j2
+    dest: "{{ postgres_data_dir }}/postgresql.conf"
+    owner: "{{ postgres_user }}"
+    group: "{{ postgres_group }}"
+    mode: '0600'
+  notify: restart postgresql
+
+- name: Deploy pg_hba.conf
+  template:
+    src: pg_hba.conf.j2
+    dest: "{{ postgres_data_dir }}/pg_hba.conf"
+    owner: "{{ postgres_user }}"
+    group: "{{ postgres_group }}"
+    mode: '0600'
+  notify: restart postgresql
+
+- name: Deploy PostgreSQL systemd service file
+  template:
+    src: postgres.service.j2
+    dest: "{{ postgres_systemd_dir }}/postgresql.service"
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart postgresql
+
+- name: Configuration deployed for 1-node standalone
+  debug:
+    msg:
+      - "PostgreSQL configuration deployed"
+      - "Config: {{ postgres_data_dir }}/postgresql.conf"
+      - "HBA: {{ postgres_data_dir }}/pg_hba.conf"
+      - "Service: {{ postgres_systemd_dir }}/postgresql.service"

@@ -1,0 +1,26 @@
+[Unit]
+Description=Patroni PostgreSQL HA Manager
+Documentation=https://patroni.readthedocs.io/
+After=network.target etcd.service
+Wants=etcd.service
+
+[Service]
+Type=simple
+User={{ postgres_user }}
+Group={{ postgres_group }}
+
+Environment=PATH={{ postgres_bin_dir }}:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory={{ patroni_config_dir }}
+
+ExecStart=/usr/local/bin/patroni {{ patroni_config_dir }}/patroni.yml
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=process
+TimeoutSec=30
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

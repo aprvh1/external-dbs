@@ -1,0 +1,37 @@
+---
+# Configure Patroni for 3-node HA cluster
+
+- name: Deploy Patroni configuration file
+  template:
+    src: patroni.yml.j2
+    dest: "{{ patroni_config_dir }}/patroni.yml"
+    owner: "{{ postgres_user }}"
+    group: "{{ postgres_group }}"
+    mode: '0600'
+  notify: restart patroni
+
+- name: Create PostgreSQL data directory for Patroni
+  file:
+    path: "{{ postgres_data_dir }}"
+    state: directory
+    owner: "{{ postgres_user }}"
+    group: "{{ postgres_group }}"
+    mode: '0700'
+
+- name: Create PostgreSQL log directory
+  file:
+    path: "{{ postgres_log_dir }}"
+    state: directory
+    owner: "{{ postgres_user }}"
+    group: "{{ postgres_group }}"
+    mode: '0755'
+
+- name: Display Patroni configuration summary
+  debug:
+    msg:
+      - "Patroni configuration deployed"
+      - "Config: {{ patroni_config_dir }}/patroni.yml"
+      - "Scope: {{ patroni_scope }}"
+      - "REST API port: {{ patroni_restapi_port }}"
+      - "PostgreSQL port: {{ postgres_port }}"
+      - "etcd endpoints: {{ groups['postgres_cluster'] | map('extract', hostvars, 'postgres_dns_name') | join(':' ~ etcd_client_port ~ ', ') }}:{{ etcd_client_port }}"

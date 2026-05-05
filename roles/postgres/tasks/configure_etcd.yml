@@ -1,0 +1,37 @@
+---
+# Configure etcd for 3-node HA cluster
+
+- name: Deploy etcd configuration file
+  template:
+    src: etcd.conf.j2
+    dest: /etc/etcd/etcd.conf
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: '0640'
+  notify: restart etcd
+
+- name: Create etcd configuration directory
+  file:
+    path: /etc/etcd
+    state: directory
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: '0750'
+
+- name: Ensure etcd data directory exists
+  file:
+    path: "{{ etcd_data_dir }}"
+    state: directory
+    owner: "{{ etcd_user }}"
+    group: "{{ etcd_group }}"
+    mode: '0750'
+
+- name: Display etcd configuration summary
+  debug:
+    msg:
+      - "etcd configuration deployed"
+      - "Config: /etc/etcd/etcd.conf"
+      - "Data dir: {{ etcd_data_dir }}"
+      - "Client port: {{ etcd_client_port }}"
+      - "Peer port: {{ etcd_peer_port }}"
+      - "Cluster members: {{ groups['postgres_cluster'] | length }}"
