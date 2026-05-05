@@ -1,0 +1,56 @@
+---
+# Main orchestrator for PostgreSQL + Patroni + etcd deployment with extensions
+
+- name: Include OS-specific variables
+  include_vars: "{{ ansible_distribution }}.yml"
+
+- name: Run preflight checks
+  include_tasks: preflight.yml
+
+# Installation Phase
+- name: Install PostgreSQL from source
+  include_tasks: install_postgres.yml
+
+- name: Install etcd (3-node HA only)
+  include_tasks: install_etcd.yml
+  when: postgres_cluster_size > 1
+
+- name: Install Patroni (3-node HA only)
+  include_tasks: install_patroni.yml
+  when: postgres_cluster_size > 1
+
+# Extension Installation (NEW for Harness TSDB migration)
+- name: Install PostgreSQL extensions
+  include_tasks: extensions.yml
+  when: postgres_extensions_enabled | bool
+
+# Configuration Phase
+- name: Configure PostgreSQL (1-node standalone)
+  include_tasks: configure_postgres.yml
+  when: postgres_cluster_size == 1
+
+- name: Configure etcd (3-node HA)
+  include_tasks: configure_etcd.yml
+  when: postgres_cluster_size > 1
+
+- name: Configure Patroni (3-node HA)
+  include_tasks: configure_patroni.yml
+  when: postgres_cluster_size > 1
+
+# Restore from backup before starting services (if specified)
+- name: Restore from backup
+  include_tasks: restore.yml
+  when: postgres_restore_backup_path | length > 0
+
+# Service Management
+- name: Start and enable services
+  include_tasks: service.yml
+
+# Extension Initialization (NEW - after services started)
+- name: Initialize PostgreSQL extensions
+  include_tasks: initialization.yml
+  when: postgres_extensions_enabled | bool
+
+# Verification
+- name: Verify deployment and extensions
+  include_tasks: verify.yml

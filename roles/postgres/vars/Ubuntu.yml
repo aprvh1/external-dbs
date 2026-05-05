@@ -1,0 +1,42 @@
+---
+# Ubuntu-specific variables for PostgreSQL deployment
+
+# PostgreSQL Build Dependencies
+postgres_build_deps:
+  - gcc
+  - make
+  - build-essential
+  - libreadline-dev
+  - zlib1g-dev
+  - flex
+  - bison
+  - perl
+  - python3
+  - python3-pip
+  - python3-dev
+  - libpython3-dev
+  - libssl-dev
+  - libkrb5-dev
+
+# Extension Build Dependencies
+postgres_extension_build_deps:
+  - postgresql-server-dev-14
+  - libkrb5-dev
+  - libssl-dev
+  - libcurl4-openssl-dev
+
+# Python packages for Ansible PostgreSQL modules
+postgres_python_packages:
+  - psycopg2-binary
+
+# System directories
+postgres_systemd_dir: "/etc/systemd/system"
+
+# User and Group
+postgres_user: "postgres"
+postgres_group: "postgres"
+postgres_uid: 999
+postgres_gid: 999
+
+etcd_user: "etcd"
+etcd_group: "etcd"

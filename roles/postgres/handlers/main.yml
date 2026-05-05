@@ -1,0 +1,48 @@
+---
+# Handlers for PostgreSQL, Patroni, and etcd services
+
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: restart postgresql
+  systemd:
+    name: postgresql
+    state: restarted
+    daemon_reload: yes
+  when: postgres_cluster_size == 1
+
+- name: restart patroni
+  systemd:
+    name: patroni
+    state: restarted
+    daemon_reload: yes
+  when: postgres_cluster_size > 1
+
+- name: restart etcd
+  systemd:
+    name: etcd
+    state: restarted
+    daemon_reload: yes
+  when: postgres_cluster_size > 1
+
+- name: start postgresql
+  systemd:
+    name: postgresql
+    state: started
+    enabled: yes
+  when: postgres_cluster_size == 1
+
+- name: start patroni
+  systemd:
+    name: patroni
+    state: started
+    enabled: yes
+  when: postgres_cluster_size > 1
+
+- name: start etcd
+  systemd:
+    name: etcd
+    state: started
+    enabled: yes
+  when: postgres_cluster_size > 1
