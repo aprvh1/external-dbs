@@ -1,0 +1,79 @@
+---
+# Redis Version
+redis_version: "7.2.4"
+redis_tarball: "redis-{{ redis_version }}.tar.gz"
+
+# Deployment Configuration
+redis_operation: "deploy"  # deploy|restore|verify
+redis_cluster_size: 3       # 1 or 3
+
+# Network Configuration - DNS names
+redis_dns_name: "{{ inventory_hostname }}"
+redis_port: 6379
+redis_sentinel_port: 26379
+
+# Authentication
+redis_requirepass: "redis_secure_pass123"
+redis_masterauth: "{{ redis_requirepass }}"
+
+# Persistence - RDB
+redis_save_enabled: true
+redis_save_intervals:
+  - "900 1"
+  - "300 10"
+  - "60 10000"
+redis_dbfilename: "dump.rdb"
+redis_dir: "/var/lib/redis"
+
+# Replication
+redis_repl_diskless_sync: "no"
+redis_repl_timeout: 60
+redis_master_dns: "{{ hostvars[groups['redis_master'][0]]['redis_dns_name'] | default('') }}"
+
+# Sentinel Configuration (3-node only)
+redis_sentinel_enabled: "{{ redis_cluster_size | int > 1 }}"
+redis_sentinel_monitor_name: "mymaster"
+redis_sentinel_quorum: 2
+redis_sentinel_down_after: 5000
+redis_sentinel_failover_timeout: 180000
+redis_sentinel_parallel_syncs: 1
+
+# Restore Configuration
+redis_restore_rdb_path: ""
+redis_restore_force: false
+
+# Installation Paths
+redis_install_dir: "/usr/local/redis"
+redis_bin_dir: "/usr/local/bin"
+redis_data_dir: "/var/lib/redis"
+redis_log_dir: "/var/log/redis"
+redis_config_dir: "/etc/redis"
+redis_pid_dir: "/var/run/redis"
+
+# User and Group
+redis_user: "redis"
+redis_group: "redis"
+redis_uid: 1002
+redis_gid: 1002
+
+# Performance
+redis_maxmemory: "2gb"
+redis_maxmemory_policy: "allkeys-lru"
+redis_tcp_backlog: 511
+redis_timeout: 0
+redis_tcp_keepalive: 300
+
+# Systemd
+redis_service_name: "redis"
+redis_sentinel_service_name: "redis-sentinel"
+redis_service_enabled: true
+
+# Build Dependencies
+redis_build_packages:
+  - gcc
+  - make
+  - build-essential
+  - tcl
+
+# Preflight
+redis_min_disk_space_gb: 20

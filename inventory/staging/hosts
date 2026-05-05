@@ -1,0 +1,19 @@
+[mongodb_cluster]
+mongo1.staging.local ansible_host=10.0.2.10 mongodb_role=primary mongodb_priority=2 mongodb_dns_name=mongo1.staging.local
+
+[mongodb_primary]
+mongo1.staging.local
+
+[mongodb_cluster:vars]
+ansible_user=ubuntu
+ansible_become=yes
+
+[redis_cluster]
+redis1.staging.local ansible_host=10.0.2.20 redis_role=master redis_dns_name=redis1.staging.local
+
+[redis_master]
+redis1.staging.local
+
+[redis_cluster:vars]
+ansible_user=ubuntu
+ansible_become=yes

@@ -1,0 +1,71 @@
+---
+# Restore MongoDB from mongodump backup
+
+- name: Verify backup path is set
+  assert:
+    that:
+      - mongodb_restore_backup_path | length > 0
+    fail_msg: "mongodb_restore_backup_path must be set when restoring"
+
+- name: Check if backup directory exists on controller
+  stat:
+    path: "{{ mongodb_restore_backup_path }}"
+  register: backup_stat
+  delegate_to: localhost
+  become: no
+
+- name: Fail if backup not found
+  fail:
+    msg: "Backup directory not found: {{ mongodb_restore_backup_path }}"
+  when: not backup_stat.stat.exists
+
+- name: Check if databases already exist
+  command: |
+    {{ mongodb_bin_dir }}/mongosh --username {{ mongodb_admin_user }} --password {{ mongodb_admin_password }} --authenticationDatabase admin --quiet --eval "db.adminCommand('listDatabases').databases.map(d => d.name).join(',')"
+  register: existing_databases
+  changed_when: false
+
+- name: Display existing databases
+  debug:
+    msg: "Existing databases: {{ existing_databases.stdout }}"
+
+- name: Restore from backup
+  block:
+    - name: Create temporary restore directory
+      file:
+        path: /tmp/mongodump-restore
+        state: directory
+        owner: "{{ mongodb_user }}"
+        group: "{{ mongodb_group }}"
+        mode: '0755'
+
+    - name: Transfer backup files to target
+      synchronize:
+        src: "{{ mongodb_restore_backup_path }}/"
+        dest: /tmp/mongodump-restore/
+      delegate_to: localhost
+
+    - name: Execute mongorestore
+      command: |
+        {{ mongodb_bin_dir }}/mongorestore \
+          --host localhost:{{ mongodb_port }} \
+          --username {{ mongodb_admin_user }} \
+          --password {{ mongodb_admin_password }} \
+          --authenticationDatabase admin \
+          /tmp/mongodump-restore/
+      register: restore_result
+
+    - name: Display restore result
+      debug:
+        var: restore_result.stdout_lines
+
+    - name: Wait for replication after restore
+      include_tasks: replication_wait.yml
+      when: mongodb_cluster_size | int > 1
+
+    - name: Cleanup temporary restore directory
+      file:
+        path: /tmp/mongodump-restore
+        state: absent
+
+  when: mongodb_restore_force or existing_databases.stdout.find('admin,config,local') == existing_databases.stdout

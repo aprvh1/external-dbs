@@ -1,0 +1,39 @@
+---
+# Initialize MongoDB replica set
+
+- name: Check if replica set is already initialized
+  command: "{{ mongodb_bin_dir }}/mongosh --quiet --eval 'rs.status().ok'"
+  register: rs_status_check
+  changed_when: false
+  failed_when: false
+
+- name: Initialize replica set
+  block:
+    - name: Generate replica set initialization script
+      template:
+        src: rs_initiate.js.j2
+        dest: /tmp/rs_initiate.js
+        mode: '0644'
+
+    - name: Execute replica set initialization
+      command: "{{ mongodb_bin_dir }}/mongosh < /tmp/rs_initiate.js"
+      register: rs_init_result
+
+    - name: Wait for primary election
+      command: "{{ mongodb_bin_dir }}/mongosh --quiet --eval 'rs.isMaster().ismaster'"
+      register: is_master_check
+      until: is_master_check.stdout.find('true') != -1
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Display replica set initialization result
+      debug:
+        msg: "Replica set {{ mongodb_replica_set_name }} initialized successfully"
+
+    - name: Cleanup initialization script
+      file:
+        path: /tmp/rs_initiate.js
+        state: absent
+
+  when: rs_status_check.stdout.find('1') == -1

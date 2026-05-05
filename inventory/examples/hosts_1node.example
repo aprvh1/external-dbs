@@ -1,0 +1,16 @@
+# Example 1-Node MongoDB Instance Inventory
+# Copy this to inventory/staging/hosts and update with your actual values
+
+[mongodb_cluster]
+mongo1.example.com ansible_host=YOUR_IP mongodb_role=primary mongodb_priority=2 mongodb_dns_name=mongo1.example.com
+
+[mongodb_primary]
+mongo1.example.com
+
+[mongodb_cluster:vars]
+ansible_user=ubuntu
+ansible_become=yes
+mongodb_cluster_size=1
+
+# Note: For 1-node deployment, DNS resolution is less critical
+# as MongoDB binds to localhost, but still recommended for consistency

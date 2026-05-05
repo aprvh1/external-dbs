@@ -1,0 +1,50 @@
+---
+# Prepare for MongoDB upgrade
+
+- name: Verify upgrade target version is set
+  assert:
+    that:
+      - mongodb_upgrade_target_version | length > 0
+    fail_msg: "mongodb_upgrade_target_version must be set for upgrades"
+
+- name: Get current MongoDB version
+  command: "{{ mongodb_bin_dir }}/mongod --version"
+  register: current_version_output
+  changed_when: false
+
+- name: Extract current version
+  set_fact:
+    current_mongodb_version: "{{ current_version_output.stdout | regex_search('v([0-9.]+)', '\\1') | first }}"
+
+- name: Check if upgrade is needed
+  assert:
+    that:
+      - current_mongodb_version != mongodb_upgrade_target_version
+    fail_msg: "MongoDB is already at version {{ mongodb_upgrade_target_version }}"
+    success_msg: "Upgrade from {{ current_mongodb_version }} to {{ mongodb_upgrade_target_version }} will proceed"
+
+- name: Verify new MongoDB tarball exists
+  stat:
+    path: "{{ role_path }}/files/mongodb-binaries/mongodb-linux-x86_64-ubuntu2004-{{ mongodb_upgrade_target_version }}.tgz"
+  register: upgrade_tarball_stat
+  delegate_to: localhost
+  become: no
+
+- name: Fail if upgrade tarball not found
+  fail:
+    msg: "Upgrade tarball not found: mongodb-linux-x86_64-ubuntu2004-{{ mongodb_upgrade_target_version }}.tgz"
+  when: not upgrade_tarball_stat.stat.exists
+
+- name: Backup current MongoDB binaries
+  command: "cp -r {{ mongodb_install_dir }} {{ mongodb_install_dir }}.backup.{{ current_mongodb_version }}"
+  args:
+    creates: "{{ mongodb_install_dir }}.backup.{{ current_mongodb_version }}"
+  when: mongodb_keep_old_binaries
+
+- name: Display upgrade preparation summary
+  debug:
+    msg: |
+      Upgrade preparation complete:
+      - Current version: {{ current_mongodb_version }}
+      - Target version: {{ mongodb_upgrade_target_version }}
+      - Backup created: {{ mongodb_keep_old_binaries }}

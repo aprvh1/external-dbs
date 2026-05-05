@@ -1,0 +1,24 @@
+# Example 3-Node MongoDB Cluster Inventory
+# Copy this to inventory/production/hosts and update with your actual values
+
+[mongodb_cluster]
+mongo1.example.com ansible_host=YOUR_IP_1 mongodb_role=primary mongodb_priority=2 mongodb_dns_name=mongo1.example.com
+mongo2.example.com ansible_host=YOUR_IP_2 mongodb_role=secondary mongodb_priority=1 mongodb_dns_name=mongo2.example.com
+mongo3.example.com ansible_host=YOUR_IP_3 mongodb_role=secondary mongodb_priority=1 mongodb_dns_name=mongo3.example.com
+
+[mongodb_primary]
+mongo1.example.com
+
+[mongodb_secondary]
+mongo2.example.com
+mongo3.example.com
+
+[mongodb_cluster:vars]
+ansible_user=ubuntu
+ansible_become=yes
+
+# IMPORTANT: Ensure DNS names (mongodb_dns_name) are resolvable on all nodes
+# Either configure proper DNS or add to /etc/hosts on each server:
+# YOUR_IP_1  mongo1.example.com mongo1
+# YOUR_IP_2  mongo2.example.com mongo2
+# YOUR_IP_3  mongo3.example.com mongo3

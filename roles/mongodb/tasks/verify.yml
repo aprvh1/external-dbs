@@ -1,0 +1,73 @@
+---
+# Verify MongoDB deployment
+
+- name: Check MongoDB process is running
+  command: pgrep -x mongod
+  register: mongod_process
+  changed_when: false
+  failed_when: mongod_process.rc != 0
+
+- name: Check MongoDB port is listening
+  wait_for:
+    port: "{{ mongodb_port }}"
+    host: "127.0.0.1"
+    timeout: 10
+    state: started
+
+- name: Get replica set status
+  command: |
+    {{ mongodb_bin_dir }}/mongosh {% if mongodb_enable_auth %}--username {{ mongodb_admin_user }} --password {{ mongodb_admin_password }} --authenticationDatabase admin{% endif %} --quiet --eval 'JSON.stringify(rs.status(), null, 2)'
+  register: rs_status
+  changed_when: false
+
+- name: Parse replica set status
+  set_fact:
+    rs_status_json: "{{ rs_status.stdout | from_json }}"
+
+- name: Display cluster member status
+  debug:
+    msg: |
+      Replica Set: {{ rs_status_json.set }}
+      Member: {{ item.name }}
+      State: {{ item.stateStr }}
+      Health: {{ item.health }}
+  with_items: "{{ rs_status_json.members }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Verify expected number of members
+  assert:
+    that:
+      - rs_status_json.members | length == mongodb_cluster_size | int
+    fail_msg: "Expected {{ mongodb_cluster_size }} members, found {{ rs_status_json.members | length }}"
+    success_msg: "Replica set has correct number of members: {{ mongodb_cluster_size }}"
+
+- name: Verify primary exists
+  assert:
+    that:
+      - rs_status_json.members | selectattr('stateStr', 'equalto', 'PRIMARY') | list | length == 1
+    fail_msg: "No primary found in replica set"
+    success_msg: "Primary elected successfully"
+
+- name: Test write operation (primary only)
+  command: |
+    {{ mongodb_bin_dir }}/mongosh --username {{ mongodb_admin_user }} --password {{ mongodb_admin_password }} --authenticationDatabase admin --quiet --eval '
+    db.getSiblingDB("test").verification.insertOne({
+      timestamp: new Date(),
+      test: "deployment_verification",
+      hostname: "{{ ansible_hostname }}"
+    })
+    '
+  when: mongodb_role == 'primary'
+  register: write_test
+  changed_when: false
+
+- name: Display verification summary
+  debug:
+    msg: |
+      ===== MongoDB Deployment Verification =====
+      Version: {{ mongodb_version }}
+      Replica Set: {{ mongodb_replica_set_name }}
+      Cluster Size: {{ mongodb_cluster_size }}
+      Authentication: {{ 'Enabled' if mongodb_enable_auth else 'Disabled' }}
+      Status: All checks passed ✓

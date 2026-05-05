@@ -1,0 +1,72 @@
+---
+# Restore Redis from RDB backup
+
+- name: Verify RDB backup path is set
+  assert:
+    that:
+      - redis_restore_rdb_path | length > 0
+    fail_msg: "redis_restore_rdb_path must be set when restoring"
+
+- name: Check if RDB backup exists
+  stat:
+    path: "{{ redis_restore_rdb_path }}"
+  register: rdb_backup_stat
+  delegate_to: localhost
+  become: no
+
+- name: Fail if RDB backup not found
+  fail:
+    msg: "RDB backup not found: {{ redis_restore_rdb_path }}"
+  when: not rdb_backup_stat.stat.exists
+
+- name: Check current data size
+  command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} DBSIZE"
+  register: current_dbsize
+  changed_when: false
+  no_log: true
+  failed_when: false
+
+- name: Restore from RDB backup
+  block:
+    - name: Stop Redis service
+      systemd:
+        name: "{{ redis_service_name }}"
+        state: stopped
+
+    - name: Backup existing dump.rdb (if exists)
+      copy:
+        src: "{{ redis_data_dir }}/{{ redis_dbfilename }}"
+        dest: "{{ redis_data_dir }}/{{ redis_dbfilename }}.backup.{{ ansible_date_time.epoch }}"
+        remote_src: yes
+      ignore_errors: yes
+
+    - name: Copy RDB backup to Redis data directory
+      copy:
+        src: "{{ redis_restore_rdb_path }}"
+        dest: "{{ redis_data_dir }}/{{ redis_dbfilename }}"
+        owner: "{{ redis_user }}"
+        group: "{{ redis_group }}"
+        mode: '0640'
+
+    - name: Start Redis service
+      systemd:
+        name: "{{ redis_service_name }}"
+        state: started
+
+    - name: Wait for Redis to load data
+      wait_for:
+        port: "{{ redis_port }}"
+        delay: 5
+        timeout: 60
+
+    - name: Verify data loaded
+      command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} DBSIZE"
+      register: restored_dbsize
+      changed_when: false
+      no_log: true
+
+    - name: Display restore result
+      debug:
+        msg: "RDB restored. Keys loaded: {{ restored_dbsize.stdout }}"
+
+  when: redis_restore_force or current_dbsize.stdout == "0"

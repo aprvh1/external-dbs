@@ -1,0 +1,94 @@
+---
+# Install Redis from source tarball
+
+- name: Check if Redis already installed
+  stat:
+    path: "{{ redis_bin_dir }}/redis-server"
+  register: redis_installed
+
+- name: Get installed Redis version
+  command: "{{ redis_bin_dir }}/redis-server --version"
+  register: redis_installed_version
+  when: redis_installed.stat.exists
+  changed_when: false
+  failed_when: false
+
+- name: Set installation required flag
+  set_fact:
+    redis_installation_required: >-
+      {{
+        not redis_installed.stat.exists or
+        redis_version not in redis_installed_version.stdout | default('')
+      }}
+
+- name: Install Redis
+  block:
+    - name: Install build dependencies
+      apt:
+        name: "{{ redis_build_packages }}"
+        state: present
+        update_cache: yes
+
+    - name: Create Redis group
+      group:
+        name: "{{ redis_group }}"
+        gid: "{{ redis_gid }}"
+        state: present
+
+    - name: Create Redis user
+      user:
+        name: "{{ redis_user }}"
+        uid: "{{ redis_uid }}"
+        group: "{{ redis_group }}"
+        shell: /bin/false
+        createhome: no
+        comment: "Redis Server"
+        state: present
+
+    - name: Create Redis directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ redis_user }}"
+        group: "{{ redis_group }}"
+        mode: '0755'
+      with_items:
+        - "{{ redis_install_dir }}"
+        - "{{ redis_data_dir }}"
+        - "{{ redis_log_dir }}"
+        - "{{ redis_config_dir }}"
+        - "{{ redis_pid_dir }}"
+
+    - name: Extract Redis tarball
+      unarchive:
+        src: "{{ role_path }}/files/redis-binaries/{{ redis_tarball }}"
+        dest: "/tmp"
+        creates: "/tmp/redis-{{ redis_version }}"
+
+    - name: Compile Redis
+      command: make
+      args:
+        chdir: "/tmp/redis-{{ redis_version }}"
+        creates: "/tmp/redis-{{ redis_version }}/src/redis-server"
+
+    - name: Install Redis binaries
+      copy:
+        src: "/tmp/redis-{{ redis_version }}/src/{{ item }}"
+        dest: "{{ redis_bin_dir }}/{{ item }}"
+        mode: '0755'
+        remote_src: yes
+      with_items:
+        - redis-server
+        - redis-cli
+        - redis-sentinel
+
+    - name: Cleanup build directory
+      file:
+        path: "/tmp/redis-{{ redis_version }}"
+        state: absent
+
+  when: redis_installation_required
+
+- name: Display installation status
+  debug:
+    msg: "Redis {{ redis_version }} {{ 'installed' if redis_installation_required else 'already installed' }}"

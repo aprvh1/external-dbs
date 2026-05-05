@@ -1,0 +1,38 @@
+---
+# Wait for replica set to stabilize
+
+- name: Wait for all replica set members to be healthy
+  command: |
+    {{ mongodb_bin_dir }}/mongosh {% if mongodb_enable_auth %}--username {{ mongodb_admin_user }} --password {{ mongodb_admin_password }} --authenticationDatabase admin{% endif %} --quiet --eval '
+    var status = rs.status();
+    var healthyMembers = status.members.filter(m => m.state === 1 || m.state === 2).length;
+    print(healthyMembers);
+    '
+  register: healthy_members
+  until: healthy_members.stdout | int == mongodb_cluster_size | int
+  retries: 30
+  delay: 10
+  changed_when: false
+
+- name: Check replication lag
+  command: |
+    {{ mongodb_bin_dir }}/mongosh {% if mongodb_enable_auth %}--username {{ mongodb_admin_user }} --password {{ mongodb_admin_password }} --authenticationDatabase admin{% endif %} --quiet --eval '
+    var status = rs.status();
+    var primary = status.members.find(m => m.state === 1);
+    var secondaries = status.members.filter(m => m.state === 2);
+    var maxLag = 0;
+    secondaries.forEach(function(sec) {
+      var lag = (primary.optimeDate - sec.optimeDate) / 1000;
+      if (lag > maxLag) maxLag = lag;
+    });
+    print(maxLag);
+    '
+  register: replication_lag
+  changed_when: false
+  when: mongodb_cluster_size | int > 1
+
+- name: Display replication status
+  debug:
+    msg: |
+      Replica set is healthy. All {{ mongodb_cluster_size }} members are online.
+      {% if mongodb_cluster_size | int > 1 %}Maximum replication lag: {{ replication_lag.stdout }} seconds{% endif %}

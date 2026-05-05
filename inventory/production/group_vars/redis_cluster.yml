@@ -1,0 +1,6 @@
+---
+# Production Redis Cluster Configuration
+
+redis_cluster_size: 3
+redis_requirepass: "redis_prod_secure_pass"
+redis_maxmemory: "4gb"

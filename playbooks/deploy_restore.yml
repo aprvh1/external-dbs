@@ -1,0 +1,10 @@
+---
+# Deploy MongoDB cluster and restore from mongodump backup
+
+- name: Deploy MongoDB and Restore from Backup
+  hosts: mongodb_cluster
+  become: yes
+  vars:
+    mongodb_operation: "restore"
+  roles:
+    - role: mongodb

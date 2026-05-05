@@ -1,0 +1,45 @@
+---
+# Main task orchestrator for Redis role
+
+- name: Load OS-specific variables
+  include_vars: "{{ ansible_distribution }}.yml"
+  tags: always
+
+- name: Run preflight checks
+  include_tasks: preflight.yml
+  tags: [preflight, deploy, restore]
+
+- name: Install Redis from source
+  include_tasks: install.yml
+  tags: [install, deploy, restore]
+
+- name: Configure Redis server
+  include_tasks: configure_redis.yml
+  tags: [configure, deploy, restore]
+
+- name: Configure Sentinel (3-node only)
+  include_tasks: configure_sentinel.yml
+  when: redis_cluster_size | int > 1
+  tags: [configure, deploy, restore]
+
+- name: Restore from RDB backup (if specified)
+  include_tasks: restore.yml
+  when:
+    - redis_restore_rdb_path | length > 0
+    - redis_role == 'master'
+  run_once: true
+  delegate_to: "{{ groups['redis_master'][0] }}"
+  tags: [restore]
+
+- name: Start Redis services
+  include_tasks: service.yml
+  tags: [service, deploy, restore]
+
+- name: Setup replication (3-node only)
+  include_tasks: replication.yml
+  when: redis_cluster_size | int > 1
+  tags: [replication, deploy, restore]
+
+- name: Verify deployment
+  include_tasks: verify.yml
+  tags: [verify, deploy, restore]

@@ -1,0 +1,77 @@
+---
+# Setup MongoDB authentication and security
+
+- name: Generate keyFile for inter-node authentication (3-node only)
+  block:
+    - name: Check if keyFile already exists
+      stat:
+        path: "{{ mongodb_keyfile_path }}"
+      register: keyfile_stat
+
+    - name: Generate random keyFile content
+      set_fact:
+        mongodb_keyfile_content: "{{ lookup('password', '/dev/null length=1024 chars=ascii_letters,digits') }}"
+      when: not keyfile_stat.stat.exists
+      run_once: true
+      delegate_to: "{{ groups['mongodb_primary'][0] }}"
+
+    - name: Create keyFile on primary
+      copy:
+        content: "{{ mongodb_keyfile_content }}"
+        dest: "{{ mongodb_keyfile_path }}"
+        owner: "{{ mongodb_user }}"
+        group: "{{ mongodb_group }}"
+        mode: '0400'
+      when: not keyfile_stat.stat.exists
+
+  when: mongodb_cluster_size | int > 1
+
+- name: Check if admin user already exists
+  command: |
+    {{ mongodb_bin_dir }}/mongosh --quiet --eval "db.getSiblingDB('admin').getUser('{{ mongodb_admin_user }}')"
+  register: admin_user_check
+  changed_when: false
+  failed_when: false
+
+- name: Create admin user
+  command: |
+    {{ mongodb_bin_dir }}/mongosh --quiet --eval '
+    db.createUser({
+      user: "{{ mongodb_admin_user }}",
+      pwd: "{{ mongodb_admin_password }}",
+      roles: [{role: "root", db: "admin"}]
+    })'
+  when: admin_user_check.stdout.find('user') == -1
+  register: admin_user_created
+
+- name: Update MongoDB config to enable authentication
+  template:
+    src: mongod.conf.j2
+    dest: "{{ mongodb_config_file }}"
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: '0644'
+  notify: restart mongodb
+  when: admin_user_created is changed
+
+- name: Restart MongoDB to enable authentication
+  systemd:
+    name: "{{ mongodb_service_name }}"
+    state: restarted
+  when: admin_user_created is changed
+
+- name: Wait for MongoDB to restart
+  wait_for:
+    port: "{{ mongodb_port }}"
+    host: "127.0.0.1"
+    delay: 5
+    timeout: 60
+    state: started
+  when: admin_user_created is changed
+
+- name: Verify authentication is working
+  command: |
+    {{ mongodb_bin_dir }}/mongosh --username {{ mongodb_admin_user }} --password {{ mongodb_admin_password }} --authenticationDatabase admin --quiet --eval "db.adminCommand('ping')"
+  register: auth_check
+  changed_when: false
+  failed_when: auth_check.rc != 0

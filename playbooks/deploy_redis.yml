@@ -1,0 +1,10 @@
+---
+# Deploy Redis cluster (1-node or 3-node with Sentinel)
+
+- name: Deploy Redis Cluster
+  hosts: redis_cluster
+  become: yes
+  vars:
+    redis_operation: "deploy"
+  roles:
+    - role: redis

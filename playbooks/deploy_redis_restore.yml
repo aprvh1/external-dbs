@@ -1,0 +1,10 @@
+---
+# Deploy Redis and restore from RDB backup
+
+- name: Deploy Redis and Restore from RDB
+  hosts: redis_cluster
+  become: yes
+  vars:
+    redis_operation: "restore"
+  roles:
+    - role: redis

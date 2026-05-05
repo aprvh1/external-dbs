@@ -1,0 +1,16 @@
+# Example 1-Node Redis Instance
+# Copy this to inventory/staging/hosts (append to existing file) and update with your actual values
+
+[redis_cluster]
+redis1.example.com ansible_host=YOUR_IP redis_role=master redis_dns_name=redis1.example.com
+
+[redis_master]
+redis1.example.com
+
+[redis_cluster:vars]
+ansible_user=ubuntu
+ansible_become=yes
+redis_cluster_size=1
+
+# Note: For 1-node deployment, Sentinel is NOT configured
+# Redis binds to localhost for security

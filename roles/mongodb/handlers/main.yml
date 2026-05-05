@@ -1,0 +1,23 @@
+---
+# Handlers for MongoDB role
+
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: restart mongod
+  systemd:
+    name: "{{ mongodb_service_name }}"
+    state: restarted
+    daemon_reload: yes
+  listen: "restart mongodb"
+
+- name: stop mongod
+  systemd:
+    name: "{{ mongodb_service_name }}"
+    state: stopped
+
+- name: start mongod
+  systemd:
+    name: "{{ mongodb_service_name }}"
+    state: started

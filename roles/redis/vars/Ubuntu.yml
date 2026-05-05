@@ -1,0 +1,4 @@
+---
+# Ubuntu-specific variables for Redis
+
+redis_systemd_dir: "/etc/systemd/system"

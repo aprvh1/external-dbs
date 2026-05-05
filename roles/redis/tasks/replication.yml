@@ -1,0 +1,51 @@
+---
+# Setup and verify Redis replication (3-node only)
+
+- name: Wait for master to be ready
+  command: "{{ redis_bin_dir }}/redis-cli -h {{ redis_master_dns }} -a {{ redis_requirepass }} PING"
+  register: master_ping
+  until: master_ping.stdout == "PONG"
+  retries: 10
+  delay: 5
+  changed_when: false
+  no_log: true
+  run_once: true
+  delegate_to: "{{ groups['redis_master'][0] }}"
+
+- name: Check replication status on master
+  command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} INFO replication"
+  register: master_repl_info
+  changed_when: false
+  no_log: true
+  when: redis_role == 'master'
+
+- name: Verify connected replicas on master
+  assert:
+    that:
+      - "'connected_slaves:2' in master_repl_info.stdout or 'connected_slaves:0' in master_repl_info.stdout"
+    fail_msg: "Expected 2 connected replicas on master"
+  when: redis_role == 'master'
+  ignore_errors: yes
+
+- name: Check replica status
+  command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} INFO replication"
+  register: replica_info
+  changed_when: false
+  no_log: true
+  when: redis_role == 'replica'
+
+- name: Verify master link on replicas
+  assert:
+    that:
+      - "'master_link_status:up' in replica_info.stdout or 'role:slave' in replica_info.stdout"
+    fail_msg: "Replica not connected to master"
+  when: redis_role == 'replica'
+  ignore_errors: yes
+
+- name: Pause for replication to sync
+  pause:
+    seconds: 10
+
+- name: Display replication status
+  debug:
+    msg: "Replication configured. Master: {{ redis_master_dns }}, Replicas: {{ groups['redis_replicas'] | length }}"

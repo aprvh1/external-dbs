@@ -1,0 +1,49 @@
+# Redis Configuration File
+
+# Network
+{% if redis_cluster_size == 1 %}
+bind 127.0.0.1
+{% else %}
+bind 0.0.0.0
+{% endif %}
+port {{ redis_port }}
+tcp-backlog {{ redis_tcp_backlog }}
+timeout {{ redis_timeout }}
+tcp-keepalive {{ redis_tcp_keepalive }}
+
+# General
+daemonize no
+supervised systemd
+pidfile {{ redis_pid_dir }}/redis.pid
+loglevel notice
+logfile {{ redis_log_dir }}/redis.log
+
+# Persistence - RDB
+{% if redis_save_enabled %}
+{% for interval in redis_save_intervals %}
+save {{ interval }}
+{% endfor %}
+{% endif %}
+dbfilename {{ redis_dbfilename }}
+dir {{ redis_data_dir }}
+rdbcompression yes
+rdbchecksum yes
+
+# Replication
+{% if redis_role == 'replica' and redis_cluster_size | int > 1 %}
+replicaof {{ redis_master_dns }} {{ redis_port }}
+{% endif %}
+masterauth {{ redis_masterauth }}
+replica-serve-stale-data yes
+replica-read-only yes
+repl-diskless-sync {{ redis_repl_diskless_sync }}
+repl-timeout {{ redis_repl_timeout }}
+
+# Security
+requirepass {{ redis_requirepass }}
+
+# Memory Management
+maxmemory {{ redis_maxmemory }}
+maxmemory-policy {{ redis_maxmemory_policy }}
+
+# No TLS - plain connections only

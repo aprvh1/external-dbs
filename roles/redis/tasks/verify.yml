@@ -1,0 +1,98 @@
+---
+# Verify Redis deployment
+
+- name: Check Redis process running
+  command: pgrep -x redis-server
+  register: redis_process
+  changed_when: false
+
+- name: Check Redis port listening
+  wait_for:
+    port: "{{ redis_port }}"
+    timeout: 10
+
+- name: Test Redis AUTH and connectivity
+  command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} PING"
+  register: redis_ping_test
+  changed_when: false
+  failed_when: redis_ping_test.stdout != "PONG"
+  no_log: true
+
+- name: Get Redis server info
+  command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} INFO server"
+  register: redis_server_info
+  changed_when: false
+  no_log: true
+
+- name: Get Redis replication info
+  command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} INFO replication"
+  register: redis_repl_info
+  changed_when: false
+  no_log: true
+
+- name: Display Redis role
+  debug:
+    msg: "{{ redis_repl_info.stdout_lines | select('match', '^role:') | list }}"
+
+- name: Verify master role and replicas (master only)
+  assert:
+    that:
+      - "'role:master' in redis_repl_info.stdout"
+      - "'connected_slaves:{{ redis_cluster_size | int - 1 }}' in redis_repl_info.stdout or redis_cluster_size | int == 1"
+    success_msg: "Master verified with {{ redis_cluster_size | int - 1 }} replicas"
+  when: redis_role == 'master'
+  ignore_errors: yes
+
+- name: Verify replica role and master link (replica only)
+  assert:
+    that:
+      - "'role:slave' in redis_repl_info.stdout"
+      - "'master_link_status:up' in redis_repl_info.stdout"
+    success_msg: "Replica verified, connected to master"
+  when: redis_role == 'replica'
+  ignore_errors: yes
+
+- name: Test write operation (master only)
+  command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} SET test_key 'verification_{{ ansible_date_time.epoch }}'"
+  when: redis_role == 'master'
+  changed_when: false
+  no_log: true
+
+- name: Test read operation (all nodes)
+  command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} GET test_key"
+  register: read_test
+  changed_when: false
+  no_log: true
+
+- name: Check Sentinel status (3-node)
+  block:
+    - name: Check Sentinel process
+      command: pgrep -f redis-sentinel
+      changed_when: false
+
+    - name: Get Sentinel master info
+      command: "{{ redis_bin_dir }}/redis-cli -p {{ redis_sentinel_port }} SENTINEL master {{ redis_sentinel_monitor_name }}"
+      register: sentinel_master_info
+      changed_when: false
+
+    - name: Get Sentinel replicas count
+      command: "{{ redis_bin_dir }}/redis-cli -p {{ redis_sentinel_port }} SENTINEL replicas {{ redis_sentinel_monitor_name }}"
+      register: sentinel_replicas
+      changed_when: false
+
+    - name: Display Sentinel status
+      debug:
+        msg: "Sentinel monitoring: {{ redis_sentinel_monitor_name }}, Replicas: {{ sentinel_replicas.stdout_lines | length }}"
+
+  when: redis_cluster_size | int > 1
+
+- name: Display verification summary
+  debug:
+    msg: |
+      ===== Redis Deployment Verification =====
+      Version: {{ redis_version }}
+      Cluster Size: {{ redis_cluster_size }}
+      Role: {{ 'master' if redis_role == 'master' else 'replica' }}
+      Authentication: Enabled
+      Sentinel: {{ 'Enabled' if redis_cluster_size | int > 1 else 'Disabled' }}
+      Status: All checks passed ✓

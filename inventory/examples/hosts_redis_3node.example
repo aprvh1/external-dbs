@@ -1,0 +1,27 @@
+# Example 3-Node Redis Cluster with Sentinel
+# Copy this to inventory/production/hosts (append to existing file) and update with your actual values
+
+[redis_cluster]
+redis1.example.com ansible_host=YOUR_IP_1 redis_role=master redis_dns_name=redis1.example.com
+redis2.example.com ansible_host=YOUR_IP_2 redis_role=replica redis_dns_name=redis2.example.com
+redis3.example.com ansible_host=YOUR_IP_3 redis_role=replica redis_dns_name=redis3.example.com
+
+[redis_master]
+redis1.example.com
+
+[redis_replicas]
+redis2.example.com
+redis3.example.com
+
+[redis_cluster:vars]
+ansible_user=ubuntu
+ansible_become=yes
+
+# IMPORTANT: Ensure DNS names (redis_dns_name) are resolvable on all nodes
+# Either configure proper DNS or add to /etc/hosts on each server:
+# YOUR_IP_1  redis1.example.com redis1
+# YOUR_IP_2  redis2.example.com redis2
+# YOUR_IP_3  redis3.example.com redis3
+
+# Each node runs both Redis server AND Sentinel
+# Sentinel provides automatic failover (quorum=2)

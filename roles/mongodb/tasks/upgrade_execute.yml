@@ -1,0 +1,85 @@
+---
+# Execute MongoDB version upgrade
+
+- name: Upgrade 3-node cluster (rolling upgrade)
+  block:
+    - name: Identify current primary
+      command: |
+        {{ mongodb_bin_dir }}/mongosh --username {{ mongodb_admin_user }} --password {{ mongodb_admin_password }} --authenticationDatabase admin --quiet --eval 'rs.isMaster().primary'
+      register: current_primary
+      run_once: true
+      delegate_to: "{{ groups['mongodb_primary'][0] }}"
+      changed_when: false
+
+    - name: Upgrade secondary nodes
+      include_tasks: upgrade_single_node.yml
+      loop: "{{ groups['mongodb_secondary'] }}"
+      loop_control:
+        loop_var: upgrade_node
+
+    - name: Step down primary
+      command: |
+        {{ mongodb_bin_dir }}/mongosh --username {{ mongodb_admin_user }} --password {{ mongodb_admin_password }} --authenticationDatabase admin --quiet --eval 'rs.stepDown({{ mongodb_upgrade_stepdown_timeout }})'
+      delegate_to: "{{ groups['mongodb_primary'][0] }}"
+      ignore_errors: yes
+
+    - name: Wait for new primary election
+      command: |
+        {{ mongodb_bin_dir }}/mongosh --username {{ mongodb_admin_user }} --password {{ mongodb_admin_password }} --authenticationDatabase admin --quiet --eval 'rs.isMaster().primary'
+      register: new_primary
+      until: new_primary.stdout != current_primary.stdout
+      retries: 12
+      delay: 10
+      run_once: true
+      delegate_to: "{{ groups['mongodb_secondary'][0] }}"
+      changed_when: false
+
+    - name: Upgrade old primary (now secondary)
+      include_tasks: upgrade_single_node.yml
+      vars:
+        upgrade_node: "{{ groups['mongodb_primary'][0] }}"
+
+  when: mongodb_cluster_size | int == 3
+
+- name: Upgrade 1-node instance
+  block:
+    - name: Stop MongoDB
+      systemd:
+        name: "{{ mongodb_service_name }}"
+        state: stopped
+
+    - name: Extract new MongoDB version
+      unarchive:
+        src: "{{ role_path }}/files/mongodb-binaries/mongodb-linux-x86_64-ubuntu2004-{{ mongodb_upgrade_target_version }}.tgz"
+        dest: "{{ mongodb_install_dir }}"
+        owner: "{{ mongodb_user }}"
+        group: "{{ mongodb_group }}"
+        extra_opts: [--strip-components=1]
+
+    - name: Start MongoDB
+      systemd:
+        name: "{{ mongodb_service_name }}"
+        state: started
+
+    - name: Wait for MongoDB to be ready
+      wait_for:
+        port: "{{ mongodb_port }}"
+        delay: 5
+        timeout: 60
+
+  when: mongodb_cluster_size | int == 1
+
+- name: Update feature compatibility version
+  command: |
+    {{ mongodb_bin_dir }}/mongosh --username {{ mongodb_admin_user }} --password {{ mongodb_admin_password }} --authenticationDatabase admin --quiet --eval 'db.adminCommand({setFeatureCompatibilityVersion: "{{ mongodb_upgrade_target_version.split(".")[0:2] | join(".") }}"})'
+  run_once: true
+  delegate_to: "{{ groups['mongodb_primary'][0] }}"
+
+- name: Verify upgrade
+  command: "{{ mongodb_bin_dir }}/mongod --version"
+  register: upgraded_version
+  changed_when: false
+
+- name: Display upgrade completion
+  debug:
+    msg: "MongoDB upgraded successfully to version {{ mongodb_upgrade_target_version }}"

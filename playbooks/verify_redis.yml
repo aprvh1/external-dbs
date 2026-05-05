@@ -1,0 +1,11 @@
+---
+# Verify Redis cluster health
+
+- name: Verify Redis Deployment
+  hosts: redis_cluster
+  become: yes
+  tasks:
+    - name: Include verification tasks
+      include_role:
+        name: redis
+        tasks_from: verify

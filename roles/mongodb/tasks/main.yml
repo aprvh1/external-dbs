@@ -1,0 +1,62 @@
+---
+# Main task orchestrator for MongoDB role
+
+- name: Load OS-specific variables
+  include_vars: "{{ ansible_distribution }}.yml"
+  tags: always
+
+- name: Run preflight checks
+  include_tasks: preflight.yml
+  tags: [preflight, deploy, restore]
+
+- name: Install MongoDB binaries
+  include_tasks: install.yml
+  tags: [install, deploy, restore]
+
+- name: Configure MongoDB
+  include_tasks: configure.yml
+  tags: [configure, deploy, restore]
+
+- name: Start MongoDB service (without auth initially)
+  include_tasks: service.yml
+  tags: [service, deploy, restore]
+
+- name: Setup authentication and security
+  include_tasks: security.yml
+  when: mongodb_enable_auth | bool
+  tags: [security, deploy, restore]
+
+- name: Initialize replica set
+  include_tasks: replication_init.yml
+  when: mongodb_role == 'primary'
+  run_once: true
+  delegate_to: "{{ groups['mongodb_primary'][0] }}"
+  tags: [replication, deploy, restore]
+
+- name: Wait for replica set to stabilize
+  include_tasks: replication_wait.yml
+  when: mongodb_cluster_size | int > 1
+  tags: [replication, deploy, restore]
+
+- name: Restore from backup
+  include_tasks: restore.yml
+  when:
+    - mongodb_operation == 'restore' or mongodb_restore_backup_path | length > 0
+    - mongodb_role == 'primary'
+  run_once: true
+  delegate_to: "{{ groups['mongodb_primary'][0] }}"
+  tags: [restore]
+
+- name: Run upgrade preparation
+  include_tasks: upgrade_prepare.yml
+  when: mongodb_operation == 'upgrade'
+  tags: [upgrade]
+
+- name: Execute upgrade
+  include_tasks: upgrade_execute.yml
+  when: mongodb_operation == 'upgrade'
+  tags: [upgrade]
+
+- name: Verify MongoDB deployment
+  include_tasks: verify.yml
+  tags: [verify, deploy, restore, upgrade]

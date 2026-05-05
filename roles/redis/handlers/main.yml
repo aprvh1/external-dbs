@@ -1,0 +1,26 @@
+---
+# Handlers for Redis role
+
+- name: reload systemd
+  systemd:
+    daemon_reload: yes
+
+- name: restart redis
+  systemd:
+    name: "{{ redis_service_name }}"
+    state: restarted
+
+- name: restart sentinel
+  systemd:
+    name: "{{ redis_sentinel_service_name }}"
+    state: restarted
+
+- name: stop redis
+  systemd:
+    name: "{{ redis_service_name }}"
+    state: stopped
+
+- name: start redis
+  systemd:
+    name: "{{ redis_service_name }}"
+    state: started

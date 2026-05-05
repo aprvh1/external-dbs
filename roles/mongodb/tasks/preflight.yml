@@ -1,0 +1,63 @@
+---
+# Preflight checks before MongoDB installation
+
+- name: Check OS distribution
+  assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_version is version('20.04', '>=')
+    fail_msg: "This role requires Ubuntu 20.04 or later"
+    success_msg: "OS check passed: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+- name: Check disk space for data directory
+  assert:
+    that:
+      - item.size_available > (mongodb_min_disk_space_gb * 1024 * 1024 * 1024)
+    fail_msg: "Insufficient disk space on {{ item.mount }}. Required: {{ mongodb_min_disk_space_gb }}GB"
+    success_msg: "Disk space check passed for {{ item.mount }}"
+  when: item.mount == (mongodb_data_dir | regex_replace('/[^/]+$', '')) or item.mount == '/'
+  with_items: "{{ ansible_mounts }}"
+  loop_control:
+    label: "{{ item.mount }}"
+
+- name: Check if MongoDB port is available
+  wait_for:
+    port: "{{ mongodb_port }}"
+    state: stopped
+    timeout: 5
+  ignore_errors: yes
+  register: port_check
+
+- name: Verify MongoDB binaries exist in files directory
+  stat:
+    path: "{{ role_path }}/files/mongodb-binaries/{{ mongodb_tarball }}"
+  register: mongodb_tarball_stat
+  delegate_to: localhost
+  become: no
+
+- name: Fail if MongoDB tarball not found
+  fail:
+    msg: |
+      MongoDB tarball not found: {{ role_path }}/files/mongodb-binaries/{{ mongodb_tarball }}
+      Please download the MongoDB binary and place it in roles/mongodb/files/mongodb-binaries/
+  when: not mongodb_tarball_stat.stat.exists
+
+- name: Check DNS resolution for cluster members (3-node only)
+  command: "getent hosts {{ hostvars[item]['mongodb_dns_name'] }}"
+  register: dns_check
+  changed_when: false
+  failed_when: dns_check.rc != 0
+  with_items: "{{ groups['mongodb_cluster'] }}"
+  when:
+    - mongodb_cluster_size | int > 1
+    - item != inventory_hostname
+
+- name: Display DNS resolution results
+  debug:
+    msg: "DNS check passed for {{ item.item }}: {{ item.stdout }}"
+  with_items: "{{ dns_check.results }}"
+  when:
+    - mongodb_cluster_size | int > 1
+    - not item.skipped | default(false)
+  loop_control:
+    label: "{{ item.item }}"

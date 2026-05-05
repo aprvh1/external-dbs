@@ -1,0 +1,10 @@
+---
+# Staging MongoDB Configuration (1-node)
+
+mongodb_cluster_size: 1
+mongodb_replica_set_name: "staging-rs0"
+mongodb_enable_auth: true
+
+# Modest settings for staging
+mongodb_cache_size_gb: 1
+mongodb_max_connections: 500

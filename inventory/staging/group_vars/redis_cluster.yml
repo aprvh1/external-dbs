@@ -1,0 +1,6 @@
+---
+# Staging Redis Configuration (1-node)
+
+redis_cluster_size: 1
+redis_requirepass: "redis_staging_pass"
+redis_maxmemory: "1gb"

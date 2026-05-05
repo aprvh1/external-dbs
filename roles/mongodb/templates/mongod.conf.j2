@@ -1,0 +1,46 @@
+# MongoDB Configuration File
+# For more information: https://docs.mongodb.com/manual/reference/configuration-options/
+
+systemLog:
+  destination: file
+  logAppend: true
+  path: {{ mongodb_log_dir }}/mongod.log
+  logRotate: reopen
+  timeStampFormat: iso8601-utc
+
+storage:
+  dbPath: {{ mongodb_data_dir }}
+  journal:
+    enabled: true
+  directoryPerDB: true
+  wiredTiger:
+    engineConfig:
+      cacheSizeGB: {{ mongodb_cache_size_gb }}
+      directoryForIndexes: true
+
+processManagement:
+  fork: true
+  pidFilePath: {{ mongodb_pid_dir }}/mongod.pid
+  timeZoneInfo: /usr/share/zoneinfo
+
+net:
+  port: {{ mongodb_port }}
+{% if mongodb_cluster_size | int == 1 %}
+  bindIp: 127.0.0.1
+{% else %}
+  bindIp: 0.0.0.0
+{% endif %}
+  maxIncomingConnections: {{ mongodb_max_connections }}
+
+replication:
+  replSetName: {{ mongodb_replica_set_name }}
+
+{% if mongodb_enable_auth | bool %}
+security:
+  authorization: enabled
+{% if mongodb_cluster_size | int > 1 %}
+  keyFile: {{ mongodb_keyfile_path }}
+{% endif %}
+{% endif %}
+
+# No TLS/SSL configuration - plain HTTP connections only

@@ -1,0 +1,28 @@
+---
+# MongoDB service management
+
+- name: Enable MongoDB service
+  systemd:
+    name: "{{ mongodb_service_name }}"
+    enabled: "{{ mongodb_service_enabled }}"
+
+- name: Start MongoDB service
+  systemd:
+    name: "{{ mongodb_service_name }}"
+    state: "{{ mongodb_service_state }}"
+
+- name: Wait for MongoDB port to be available
+  wait_for:
+    port: "{{ mongodb_port }}"
+    host: "127.0.0.1"
+    delay: 5
+    timeout: 60
+    state: started
+
+- name: Check MongoDB is responding
+  command: "{{ mongodb_bin_dir }}/mongosh --quiet --eval 'db.adminCommand(\"ping\")'"
+  register: mongo_ping
+  changed_when: false
+  retries: 5
+  delay: 10
+  until: mongo_ping.rc == 0

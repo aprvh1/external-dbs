@@ -1,0 +1,29 @@
+[Unit]
+Description=MongoDB Database Server
+Documentation=https://docs.mongodb.org/manual
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User={{ mongodb_user }}
+Group={{ mongodb_group }}
+RuntimeDirectory=mongodb
+PIDFile={{ mongodb_pid_dir }}/mongod.pid
+
+ExecStart={{ mongodb_bin_dir }}/mongod --config {{ mongodb_config_file }} --fork
+ExecStop={{ mongodb_bin_dir }}/mongod --config {{ mongodb_config_file }} --shutdown
+
+LimitFSIZE=infinity
+LimitCPU=infinity
+LimitAS=infinity
+LimitNOFILE={{ mongodb_nofile_limit }}
+LimitNPROC={{ mongodb_nproc_limit }}
+TasksMax=infinity
+TasksAccounting=false
+
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

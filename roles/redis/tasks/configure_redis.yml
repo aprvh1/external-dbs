@@ -1,0 +1,24 @@
+---
+# Configure Redis server
+
+- name: Deploy Redis configuration
+  template:
+    src: redis.conf.j2
+    dest: "{{ redis_config_dir }}/redis.conf"
+    owner: "{{ redis_user }}"
+    group: "{{ redis_group }}"
+    mode: '0640'
+  notify: restart redis
+
+- name: Deploy Redis systemd service
+  template:
+    src: redis.service.j2
+    dest: "{{ redis_systemd_dir }}/{{ redis_service_name }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload systemd
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes

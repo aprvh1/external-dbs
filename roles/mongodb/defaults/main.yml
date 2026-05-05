@@ -1,0 +1,59 @@
+---
+# MongoDB Version
+mongodb_version: "7.0.15"
+mongodb_tarball: "mongodb-linux-x86_64-ubuntu2004-{{ mongodb_version }}.tgz"
+
+# Deployment Configuration
+mongodb_operation: "deploy"  # deploy|restore|upgrade|verify
+mongodb_cluster_size: 3       # 1 or 3
+mongodb_replica_set_name: "rs0"
+
+# Authentication
+mongodb_enable_auth: true
+mongodb_admin_user: "admin"
+mongodb_admin_password: "testp@ssw0rd123"
+
+# Network Configuration - DNS names
+mongodb_dns_name: "{{ inventory_hostname }}"  # Override in inventory per node
+mongodb_port: 27017
+
+# Installation Paths
+mongodb_install_dir: "/usr/local/mongodb"
+mongodb_bin_dir: "/usr/local/bin"
+mongodb_data_dir: "/var/lib/mongodb"
+mongodb_log_dir: "/var/log/mongodb"
+mongodb_config_dir: "/etc/mongodb"
+mongodb_config_file: "/etc/mongod.conf"
+mongodb_pid_dir: "/var/run/mongodb"
+
+# User and Group
+mongodb_user: "mongodb"
+mongodb_group: "mongodb"
+mongodb_uid: 1001
+mongodb_gid: 1001
+
+# Restore Configuration
+mongodb_restore_backup_path: ""  # Set this to backup directory path when restoring
+mongodb_restore_force: false     # Force restore even if databases exist
+
+# Upgrade Configuration
+mongodb_upgrade_target_version: ""
+mongodb_keep_old_binaries: true
+mongodb_upgrade_stepdown_timeout: 60
+
+# Performance Tuning
+mongodb_cache_size_gb: "{{ (ansible_memtotal_mb * 0.5 / 1024) | round(1) }}"
+mongodb_max_connections: 1000
+
+# KeyFile for Inter-node Authentication (3-node only)
+mongodb_keyfile_path: "/etc/mongodb/keyfile"
+mongodb_keyfile_content: ""  # Auto-generated if empty
+
+# Systemd Configuration
+mongodb_service_name: "mongod"
+mongodb_service_enabled: true
+mongodb_service_state: "started"
+
+# Preflight Checks
+mongodb_min_disk_space_gb: 50
+mongodb_min_log_space_gb: 20

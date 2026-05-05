@@ -1,0 +1,96 @@
+---
+# Install MongoDB binaries from local tarball
+
+- name: Check if MongoDB is already installed
+  stat:
+    path: "{{ mongodb_bin_dir }}/mongod"
+  register: mongod_installed
+
+- name: Get installed MongoDB version
+  command: "{{ mongodb_bin_dir }}/mongod --version"
+  register: mongodb_installed_version
+  when: mongod_installed.stat.exists
+  changed_when: false
+  failed_when: false
+
+- name: Set installation required flag
+  set_fact:
+    mongodb_installation_required: >-
+      {{
+        not mongod_installed.stat.exists or
+        mongodb_version not in mongodb_installed_version.stdout | default('')
+      }}
+
+- name: Install MongoDB
+  block:
+    - name: Install required system packages
+      apt:
+        name: "{{ mongodb_required_packages }}"
+        state: present
+        update_cache: yes
+
+    - name: Install Python packages for Ansible
+      pip:
+        name: "{{ mongodb_python_packages }}"
+        state: present
+
+    - name: Create MongoDB group
+      group:
+        name: "{{ mongodb_group }}"
+        gid: "{{ mongodb_gid }}"
+        state: present
+
+    - name: Create MongoDB user
+      user:
+        name: "{{ mongodb_user }}"
+        uid: "{{ mongodb_uid }}"
+        group: "{{ mongodb_group }}"
+        shell: /bin/false
+        createhome: no
+        comment: "MongoDB Server"
+        state: present
+
+    - name: Create MongoDB directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ mongodb_user }}"
+        group: "{{ mongodb_group }}"
+        mode: '0755'
+      with_items:
+        - "{{ mongodb_install_dir }}"
+        - "{{ mongodb_data_dir }}"
+        - "{{ mongodb_log_dir }}"
+        - "{{ mongodb_config_dir }}"
+        - "{{ mongodb_pid_dir }}"
+
+    - name: Extract MongoDB tarball
+      unarchive:
+        src: "{{ role_path }}/files/mongodb-binaries/{{ mongodb_tarball }}"
+        dest: "{{ mongodb_install_dir }}"
+        owner: "{{ mongodb_user }}"
+        group: "{{ mongodb_group }}"
+        extra_opts: [--strip-components=1]
+        creates: "{{ mongodb_install_dir }}/bin/mongod"
+
+    - name: Create symlinks for MongoDB binaries
+      file:
+        src: "{{ mongodb_install_dir }}/bin/{{ item }}"
+        dest: "{{ mongodb_bin_dir }}/{{ item }}"
+        state: link
+      with_items:
+        - mongod
+        - mongosh
+        - mongos
+
+  when: mongodb_installation_required
+
+- name: Display installation status
+  debug:
+    msg: "MongoDB {{ mongodb_version }} installation completed"
+  when: mongodb_installation_required
+
+- name: Display skip message
+  debug:
+    msg: "MongoDB {{ mongodb_version }} already installed, skipping installation"
+  when: not mongodb_installation_required

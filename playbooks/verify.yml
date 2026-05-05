@@ -1,0 +1,11 @@
+---
+# Verify MongoDB cluster health
+
+- name: Verify MongoDB Deployment
+  hosts: mongodb_cluster
+  become: yes
+  tasks:
+    - name: Include verification tasks
+      include_role:
+        name: mongodb
+        tasks_from: verify

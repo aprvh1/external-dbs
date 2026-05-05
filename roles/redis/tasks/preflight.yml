@@ -1,0 +1,56 @@
+---
+# Preflight checks for Redis installation
+
+- name: Check OS distribution
+  assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_version is version('20.04', '>=')
+    fail_msg: "This role requires Ubuntu 20.04 or later"
+
+- name: Check disk space
+  assert:
+    that:
+      - item.size_available > (redis_min_disk_space_gb * 1024 * 1024 * 1024)
+    fail_msg: "Insufficient disk space on {{ item.mount }}"
+  when: item.mount == '/' or item.mount == (redis_data_dir | regex_replace('/[^/]+$', ''))
+  with_items: "{{ ansible_mounts }}"
+  loop_control:
+    label: "{{ item.mount }}"
+
+- name: Check Redis port available
+  wait_for:
+    port: "{{ redis_port }}"
+    state: stopped
+    timeout: 5
+  ignore_errors: yes
+
+- name: Check Sentinel port available (3-node)
+  wait_for:
+    port: "{{ redis_sentinel_port }}"
+    state: stopped
+    timeout: 5
+  when: redis_cluster_size | int > 1
+  ignore_errors: yes
+
+- name: Verify Redis tarball exists
+  stat:
+    path: "{{ role_path }}/files/redis-binaries/{{ redis_tarball }}"
+  register: redis_tarball_stat
+  delegate_to: localhost
+  become: no
+
+- name: Fail if tarball not found
+  fail:
+    msg: "Redis tarball not found: {{ role_path }}/files/redis-binaries/{{ redis_tarball }}"
+  when: not redis_tarball_stat.stat.exists
+
+- name: Check DNS resolution for cluster members (3-node)
+  command: "getent hosts {{ hostvars[item]['redis_dns_name'] }}"
+  register: dns_check
+  changed_when: false
+  failed_when: dns_check.rc != 0
+  with_items: "{{ groups['redis_cluster'] }}"
+  when:
+    - redis_cluster_size | int > 1
+    - item != inventory_hostname

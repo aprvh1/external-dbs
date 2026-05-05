@@ -1,0 +1,22 @@
+// Replica Set Initialization Script for {{ mongodb_replica_set_name }}
+
+rs.initiate({
+  _id: "{{ mongodb_replica_set_name }}",
+  members: [
+    {
+      _id: 0,
+      host: "{{ hostvars[groups['mongodb_cluster'][0]]['mongodb_dns_name'] }}:{{ mongodb_port }}",
+      priority: {{ hostvars[groups['mongodb_cluster'][0]]['mongodb_priority'] }}
+    }{% if mongodb_cluster_size | int == 3 %},
+    {
+      _id: 1,
+      host: "{{ hostvars[groups['mongodb_cluster'][1]]['mongodb_dns_name'] }}:{{ mongodb_port }}",
+      priority: {{ hostvars[groups['mongodb_cluster'][1]]['mongodb_priority'] }}
+    },
+    {
+      _id: 2,
+      host: "{{ hostvars[groups['mongodb_cluster'][2]]['mongodb_dns_name'] }}:{{ mongodb_port }}",
+      priority: {{ hostvars[groups['mongodb_cluster'][2]]['mongodb_priority'] }}
+    }{% endif %}
+  ]
+})

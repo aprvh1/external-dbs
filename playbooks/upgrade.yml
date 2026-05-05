@@ -1,0 +1,19 @@
+---
+# Upgrade MongoDB version (rolling upgrade for 3-node)
+
+- name: Upgrade MongoDB Version
+  hosts: mongodb_cluster
+  become: yes
+  vars:
+    mongodb_operation: "upgrade"
+  pre_tasks:
+    - name: Verify upgrade target version is provided
+      assert:
+        that:
+          - mongodb_upgrade_target_version is defined
+          - mongodb_upgrade_target_version | length > 0
+        fail_msg: "Please provide mongodb_upgrade_target_version via -e flag"
+      run_once: true
+
+  roles:
+    - role: mongodb

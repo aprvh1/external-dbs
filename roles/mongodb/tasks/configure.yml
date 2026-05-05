@@ -1,0 +1,59 @@
+---
+# Configure MongoDB
+
+- name: Deploy MongoDB configuration file
+  template:
+    src: mongod.conf.j2
+    dest: "{{ mongodb_config_file }}"
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    mode: '0644'
+  notify: restart mongodb
+
+- name: Deploy systemd service file
+  template:
+    src: mongod.service.j2
+    dest: "{{ mongodb_systemd_dir }}/{{ mongodb_service_name }}.service"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload systemd
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+
+- name: Disable Transparent Huge Pages (THP)
+  block:
+    - name: Create THP disable script
+      copy:
+        dest: /etc/init.d/disable-transparent-hugepages
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          ### BEGIN INIT INFO
+          # Provides:          disable-transparent-hugepages
+          # Required-Start:    $local_fs
+          # Required-Stop:
+          # Default-Start:     2 3 4 5
+          # Default-Stop:      0 1 6
+          # Short-Description: Disable Transparent Huge Pages (THP)
+          ### END INIT INFO
+
+          case $1 in
+            start)
+              if [ -d /sys/kernel/mm/transparent_hugepage ]; then
+                echo never > /sys/kernel/mm/transparent_hugepage/enabled
+                echo never > /sys/kernel/mm/transparent_hugepage/defrag
+              fi
+              ;;
+          esac
+
+    - name: Enable THP disable script
+      systemd:
+        name: disable-transparent-hugepages
+        enabled: yes
+        state: started
+      ignore_errors: yes
+
+  when: mongodb_disable_thp | bool

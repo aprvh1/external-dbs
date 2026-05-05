@@ -1,0 +1,22 @@
+# Example terraform.tfvars
+# Copy this to terraform.tfvars and update with your values
+
+# Artifactory Configuration
+artifactory_url      = "https://artifactory.company.com/artifactory"
+artifactory_username = "helm-user"
+# artifactory_password = "password" # Set via TF_VAR_artifactory_password or -var-file
+
+# Helm Chart Configuration
+helm_repo_name = "helm-local"
+chart_name     = "harness-smp"
+chart_version  = "0.38.0"
+
+# Kubernetes Configuration
+namespace        = "harness"
+create_namespace = true
+release_name     = "harness-smp"
+
+# Deployment Configuration
+values_file = "./values.yaml"
+timeout     = 900  # 15 minutes
+wait        = true

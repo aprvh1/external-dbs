@@ -1,0 +1,10 @@
+---
+# Deploy fresh MongoDB cluster (1-node or 3-node)
+
+- name: Deploy MongoDB Cluster
+  hosts: mongodb_cluster
+  become: yes
+  vars:
+    mongodb_operation: "deploy"
+  roles:
+    - role: mongodb

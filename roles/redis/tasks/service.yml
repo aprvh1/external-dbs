@@ -1,0 +1,37 @@
+---
+# Redis service management
+
+- name: Enable and start Redis service
+  systemd:
+    name: "{{ redis_service_name }}"
+    enabled: "{{ redis_service_enabled }}"
+    state: started
+
+- name: Wait for Redis port
+  wait_for:
+    port: "{{ redis_port }}"
+    host: "127.0.0.1"
+    delay: 2
+    timeout: 30
+
+- name: Test Redis connectivity with AUTH
+  command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} PING"
+  register: redis_ping
+  changed_when: false
+  failed_when: redis_ping.stdout != "PONG"
+  no_log: true
+
+- name: Enable and start Sentinel service (3-node)
+  systemd:
+    name: "{{ redis_sentinel_service_name }}"
+    enabled: "{{ redis_service_enabled }}"
+    state: started
+  when: redis_cluster_size | int > 1
+
+- name: Wait for Sentinel port (3-node)
+  wait_for:
+    port: "{{ redis_sentinel_port }}"
+    host: "127.0.0.1"
+    delay: 2
+    timeout: 30
+  when: redis_cluster_size | int > 1

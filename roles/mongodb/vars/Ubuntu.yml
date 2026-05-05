@@ -1,0 +1,22 @@
+---
+# Ubuntu-specific variables
+
+# Required system packages
+mongodb_required_packages:
+  - numactl
+  - python3
+  - python3-pip
+
+# Python packages for Ansible MongoDB modules
+mongodb_python_packages:
+  - pymongo
+
+# System limits
+mongodb_nofile_limit: 64000
+mongodb_nproc_limit: 64000
+
+# Disable Transparent Huge Pages (THP)
+mongodb_disable_thp: true
+
+# OS-specific paths
+mongodb_systemd_dir: "/etc/systemd/system"

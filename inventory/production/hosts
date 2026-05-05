@@ -1,0 +1,31 @@
+[mongodb_cluster]
+mongo1.prod.local ansible_host=10.0.1.10 mongodb_role=primary mongodb_priority=2 mongodb_dns_name=mongo1.prod.local
+mongo2.prod.local ansible_host=10.0.1.11 mongodb_role=secondary mongodb_priority=1 mongodb_dns_name=mongo2.prod.local
+mongo3.prod.local ansible_host=10.0.1.12 mongodb_role=secondary mongodb_priority=1 mongodb_dns_name=mongo3.prod.local
+
+[mongodb_primary]
+mongo1.prod.local
+
+[mongodb_secondary]
+mongo2.prod.local
+mongo3.prod.local
+
+[mongodb_cluster:vars]
+ansible_user=ubuntu
+ansible_become=yes
+
+[redis_cluster]
+redis1.prod.local ansible_host=10.0.1.20 redis_role=master redis_dns_name=redis1.prod.local
+redis2.prod.local ansible_host=10.0.1.21 redis_role=replica redis_dns_name=redis2.prod.local
+redis3.prod.local ansible_host=10.0.1.22 redis_role=replica redis_dns_name=redis3.prod.local
+
+[redis_master]
+redis1.prod.local
+
+[redis_replicas]
+redis2.prod.local
+redis3.prod.local
+
+[redis_cluster:vars]
+ansible_user=ubuntu
+ansible_become=yes

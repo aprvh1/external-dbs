@@ -1,0 +1,40 @@
+---
+# Upgrade a single MongoDB node (helper task for rolling upgrades)
+
+- name: Stop MongoDB on {{ upgrade_node }}
+  systemd:
+    name: "{{ mongodb_service_name }}"
+    state: stopped
+  delegate_to: "{{ upgrade_node }}"
+
+- name: Extract new MongoDB version on {{ upgrade_node }}
+  unarchive:
+    src: "{{ role_path }}/files/mongodb-binaries/mongodb-linux-x86_64-ubuntu2004-{{ mongodb_upgrade_target_version }}.tgz"
+    dest: "{{ mongodb_install_dir }}"
+    owner: "{{ mongodb_user }}"
+    group: "{{ mongodb_group }}"
+    extra_opts: [--strip-components=1]
+  delegate_to: "{{ upgrade_node }}"
+
+- name: Start MongoDB on {{ upgrade_node }}
+  systemd:
+    name: "{{ mongodb_service_name }}"
+    state: started
+  delegate_to: "{{ upgrade_node }}"
+
+- name: Wait for node to rejoin replica set
+  command: |
+    {{ mongodb_bin_dir }}/mongosh --username {{ mongodb_admin_user }} --password {{ mongodb_admin_password }} --authenticationDatabase admin --quiet --eval '
+    var member = rs.status().members.find(m => m.name.includes("{{ hostvars[upgrade_node].mongodb_dns_name }}"));
+    print(member ? member.stateStr : "NOT_FOUND");
+    '
+  register: node_state
+  until: node_state.stdout.find('SECONDARY') != -1 or node_state.stdout.find('PRIMARY') != -1
+  retries: 30
+  delay: 10
+  delegate_to: "{{ groups['mongodb_primary'][0] }}"
+  changed_when: false
+
+- name: Display node upgrade status
+  debug:
+    msg: "Node {{ upgrade_node }} upgraded and rejoined as {{ node_state.stdout }}"

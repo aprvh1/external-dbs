@@ -1,0 +1,16 @@
+# Redis Sentinel Configuration
+
+port {{ redis_sentinel_port }}
+dir {{ redis_data_dir }}
+logfile {{ redis_log_dir }}/sentinel.log
+
+# Monitor master
+sentinel monitor {{ redis_sentinel_monitor_name }} {{ redis_master_dns }} {{ redis_port }} {{ redis_sentinel_quorum }}
+sentinel auth-pass {{ redis_sentinel_monitor_name }} {{ redis_requirepass }}
+sentinel down-after-milliseconds {{ redis_sentinel_monitor_name }} {{ redis_sentinel_down_after }}
+sentinel parallel-syncs {{ redis_sentinel_monitor_name }} {{ redis_sentinel_parallel_syncs }}
+sentinel failover-timeout {{ redis_sentinel_monitor_name }} {{ redis_sentinel_failover_timeout }}
+
+# Sentinel needs write access to this file for runtime updates
+# File ownership: {{ redis_user }}:{{ redis_group }}
+# File mode: 0640
