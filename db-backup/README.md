@@ -35,7 +35,7 @@ db-backup/
 4. **Database CLI tools** installed:
    - MongoDB: `mongodump` (installed by `roles/mongodb`)
    - Redis: `redis-cli` (installed by `roles/redis`)
-   - PostgreSQL: `pg_dumpall` (installed by `roles/postgres`)
+   - PostgreSQL: `pg_basebackup` (installed by `roles/postgres`)
 
 ## Inventory Setup
 
@@ -168,8 +168,8 @@ Connection vars inherited from `roles/redis/defaults/main.yml`:
 Connection vars inherited from `roles/postgres/defaults/main.yml`:
 - `postgres_bin_dir`
 - `postgres_port`
-- `postgres_superuser`
-- `postgres_superuser_password`
+- `postgres_replication_user`
+- `postgres_replication_password`
 
 ### Via group_vars
 
@@ -196,8 +196,8 @@ Then backups use these defaults without `-e` flags.
 - `s3://bucket/prefix/redis-dump-<timestamp>.rdb.gz.sha256` — checksum
 
 ### PostgreSQL
-- `s3://bucket/prefix/postgres-full-<timestamp>.sql.gz` — pg_dumpall archive
-- `s3://bucket/prefix/postgres-full-<timestamp>.sql.gz.sha256` — checksum
+- `s3://bucket/prefix/postgres-basebackup-<timestamp>.tar.gz` — pg_basebackup physical snapshot
+- `s3://bucket/prefix/postgres-basebackup-<timestamp>.tar.gz.sha256` — checksum
 
 ## Verification
 
@@ -232,9 +232,9 @@ Example cron job to backup daily at 2 AM:
 ## Performance Notes
 
 - **Replication Lag**: Backups run on replica/secondary nodes to avoid primary load. Acceptable lag depends on your RTO/RPO requirements.
-- **Disk Space**: Ensure `/tmp` has enough free space for uncompressed dumps during backup.
+- **Disk Space**: Ensure `/tmp` has enough free space for the full data directory copy during PostgreSQL backups (pg_basebackup can be large).
 - **Network**: S3 upload speed depends on instance network bandwidth. Monitor `aws s3 cp` output.
-- **Database Load**: mongodump, pg_dumpall, and BGSAVE impact replica performance. Run during maintenance windows if needed.
+- **Database Load**: mongodump, pg_basebackup, and BGSAVE impact replica performance. Run during maintenance windows if needed.
 
 ## Troubleshooting
 
@@ -287,9 +287,9 @@ MongoDB Primary          Redis Master              PostgreSQL Leader
       │                       │                           │
   Secondary                Replica 1                  Standby/Replica
       ↓                       ↓                           ↓
-  mongodump              BGSAVE + RDB cp            pg_dumpall
+  mongodump              BGSAVE + RDB cp            pg_basebackup
       ↓                       ↓                           ↓
-  tar + gzip            gzip RDB                   gzip SQL
+  tar + gzip            gzip RDB                   tar + gzip
       ↓                       ↓                           ↓
   aws s3 cp             aws s3 cp                   aws s3 cp
       ↓                       ↓                           ↓
@@ -298,10 +298,15 @@ MongoDB Primary          Redis Master              PostgreSQL Leader
 
 ## Notes
 
-- Backups are **logical** for MongoDB and PostgreSQL (human-readable/portable) and **binary** for Redis (RDB format).
+- **Format Consistency**: Backup formats are chosen to match existing restore roles:
+  - **MongoDB**: mongodump (logical) — matches `roles/mongodb/tasks/restore.yml` via `mongorestore`
+  - **Redis**: RDB binary (physical snapshot) — matches `roles/redis/tasks/restore.yml` 
+  - **PostgreSQL**: pg_basebackup (physical snapshot) — matches `roles/postgres/tasks/restore.yml` via `synchronize` and `postgres_restore_type: basebackup`
+  - All backed-up archives are tarred for S3 transport; extract before passing to restore roles.
 - All backups include SHA256 checksums for integrity verification.
 - Local temporary files are cleaned up after upload to S3.
 - No backup encryption is applied by these playbooks; configure S3 encryption separately if required.
+- PostgreSQL backups use the `postgres_replication_user` role (which has REPLICATION privileges per pg_hba.conf) instead of the superuser, matching the authentication protocol required by pg_basebackup.
 
 ## Related Files
 

@@ -1,5 +1,5 @@
 ---
-# PostgreSQL Backup to S3
+# PostgreSQL Backup to S3 (pg_basebackup physical snapshot)
 
 - name: Assert S3 bucket is set
   assert:
@@ -16,26 +16,39 @@
 - name: Create backup timestamp
   set_fact:
     postgres_backup_ts: "{{ ansible_date_time.iso8601_basic_short }}"
-    postgres_backup_file: "{{ postgres_backup_local_tmp_dir }}/postgres-full-{{ ansible_date_time.iso8601_basic_short }}.sql"
+    postgres_backup_dir: "{{ postgres_backup_local_tmp_dir }}/postgres-basebackup-{{ ansible_date_time.iso8601_basic_short }}"
 
-- name: Execute pg_dumpall
-  shell: |
-    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/pg_dumpall \
-      -U {{ postgres_superuser }} \
+- name: Create temporary backup directory
+  file:
+    path: "{{ postgres_backup_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Execute pg_basebackup
+  command: |
+    {{ postgres_bin_dir }}/pg_basebackup \
       -h localhost \
-      -p {{ postgres_port }} > {{ postgres_backup_file }}
+      -p {{ postgres_port }} \
+      -U {{ postgres_replication_user }} \
+      -D {{ postgres_backup_dir }} \
+      -Fp -Xs -P
   environment:
-    PGPASSWORD: "{{ postgres_superuser_password }}"
+    PGPASSWORD: "{{ postgres_replication_password }}"
+  register: basebackup_result
   changed_when: true
   no_log: true
 
-- name: Compress SQL dump
-  command: gzip {{ postgres_backup_file }}
-  register: gzip_result
+- name: Display pg_basebackup output
+  debug:
+    var: basebackup_result.stderr_lines
+
+- name: Create tar archive of backup
+  command: tar czf {{ postgres_backup_dir }}.tar.gz -C {{ postgres_backup_local_tmp_dir }} postgres-basebackup-{{ ansible_date_time.iso8601_basic_short }}/
+  register: tar_result
   changed_when: true
 
 - name: Calculate checksum
-  command: sha256sum {{ postgres_backup_file }}.gz
+  command: sha256sum {{ postgres_backup_dir }}.tar.gz
   register: checksum_result
   changed_when: false
 
@@ -46,30 +59,36 @@
 - name: Save checksum to file
   copy:
     content: "{{ checksum_result.stdout }}\n"
-    dest: "{{ postgres_backup_file }}.gz.sha256"
+    dest: "{{ postgres_backup_dir }}.tar.gz.sha256"
   changed_when: false
 
 - name: Upload backup archive to S3
   command: >
-    aws s3 cp {{ postgres_backup_file }}.gz
-    s3://{{ postgres_backup_s3_bucket }}/{{ postgres_backup_s3_prefix }}/postgres-full-{{ postgres_backup_ts }}.sql.gz
+    aws s3 cp {{ postgres_backup_dir }}.tar.gz
+    s3://{{ postgres_backup_s3_bucket }}/{{ postgres_backup_s3_prefix }}/postgres-basebackup-{{ postgres_backup_ts }}.tar.gz
   changed_when: true
 
 - name: Upload checksum to S3
   command: >
-    aws s3 cp {{ postgres_backup_file }}.gz.sha256
-    s3://{{ postgres_backup_s3_bucket }}/{{ postgres_backup_s3_prefix }}/postgres-full-{{ postgres_backup_ts }}.sql.gz.sha256
+    aws s3 cp {{ postgres_backup_dir }}.tar.gz.sha256
+    s3://{{ postgres_backup_s3_bucket }}/{{ postgres_backup_s3_prefix }}/postgres-basebackup-{{ postgres_backup_ts }}.tar.gz.sha256
   changed_when: true
 
-- name: Cleanup local backup file
+- name: Cleanup local backup directory
   file:
-    path: "{{ postgres_backup_file }}.gz"
+    path: "{{ postgres_backup_dir }}"
+    state: absent
+  changed_when: false
+
+- name: Cleanup local archive
+  file:
+    path: "{{ postgres_backup_dir }}.tar.gz"
     state: absent
   changed_when: false
 
 - name: Cleanup local checksum file
   file:
-    path: "{{ postgres_backup_file }}.gz.sha256"
+    path: "{{ postgres_backup_dir }}.tar.gz.sha256"
     state: absent
   changed_when: false
 
@@ -80,8 +99,9 @@
       - "PostgreSQL Backup Completed Successfully"
       - "========================================="
       - "Timestamp: {{ postgres_backup_ts }}"
+      - "Backup Type: pg_basebackup (physical)"
       - "Checksum: {{ postgres_backup_checksum }}"
       - "S3 Bucket: {{ postgres_backup_s3_bucket }}"
       - "S3 Prefix: {{ postgres_backup_s3_prefix }}"
-      - "S3 Object: postgres-full-{{ postgres_backup_ts }}.sql.gz"
+      - "S3 Object: postgres-basebackup-{{ postgres_backup_ts }}.tar.gz"
       - "========================================="
