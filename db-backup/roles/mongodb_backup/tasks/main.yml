@@ -1,0 +1,103 @@
+---
+# MongoDB Backup to S3
+
+- name: Assert S3 bucket is set
+  assert:
+    that:
+      - mongodb_backup_s3_bucket | length > 0
+    fail_msg: "mongodb_backup_s3_bucket must be set"
+    success_msg: "MongoDB backup will be stored in s3://{{ mongodb_backup_s3_bucket }}/{{ mongodb_backup_s3_prefix }}/"
+
+- name: Verify AWS CLI is installed
+  command: command -v aws
+  changed_when: false
+  register: aws_cli_check
+
+- name: Create backup timestamp
+  set_fact:
+    mongodb_backup_ts: "{{ ansible_date_time.iso8601_basic_short }}"
+    mongodb_backup_dir: "{{ mongodb_backup_local_tmp_dir }}/mongodb-backup-{{ ansible_date_time.iso8601_basic_short }}"
+
+- name: Create temporary backup directory
+  file:
+    path: "{{ mongodb_backup_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Execute mongodump
+  command: |
+    {{ mongodb_bin_dir }}/mongodump \
+      --host localhost:{{ mongodb_port }} \
+      --username {{ mongodb_admin_user }} \
+      --password {{ mongodb_admin_password }} \
+      --authenticationDatabase admin \
+      --out {{ mongodb_backup_dir }}/dump
+  register: mongodump_result
+  changed_when: true
+
+- name: Display mongodump output
+  debug:
+    var: mongodump_result.stderr_lines
+
+- name: Create tar archive of backup
+  command: tar czf {{ mongodb_backup_dir }}.tar.gz -C {{ mongodb_backup_dir }} dump/
+  register: tar_result
+  changed_when: true
+
+- name: Calculate checksum
+  command: sha256sum {{ mongodb_backup_dir }}.tar.gz
+  register: checksum_result
+  changed_when: false
+
+- name: Extract checksum value
+  set_fact:
+    mongodb_backup_checksum: "{{ checksum_result.stdout.split()[0] }}"
+
+- name: Save checksum to file
+  copy:
+    content: "{{ checksum_result.stdout }}\n"
+    dest: "{{ mongodb_backup_dir }}.tar.gz.sha256"
+  changed_when: false
+
+- name: Upload backup archive to S3
+  command: >
+    aws s3 cp {{ mongodb_backup_dir }}.tar.gz
+    s3://{{ mongodb_backup_s3_bucket }}/{{ mongodb_backup_s3_prefix }}/mongodb-backup-{{ mongodb_backup_ts }}.tar.gz
+  changed_when: true
+
+- name: Upload checksum to S3
+  command: >
+    aws s3 cp {{ mongodb_backup_dir }}.tar.gz.sha256
+    s3://{{ mongodb_backup_s3_bucket }}/{{ mongodb_backup_s3_prefix }}/mongodb-backup-{{ mongodb_backup_ts }}.tar.gz.sha256
+  changed_when: true
+
+- name: Cleanup local backup directory
+  file:
+    path: "{{ mongodb_backup_dir }}"
+    state: absent
+  changed_when: false
+
+- name: Cleanup local archive
+  file:
+    path: "{{ mongodb_backup_dir }}.tar.gz"
+    state: absent
+  changed_when: false
+
+- name: Cleanup local checksum file
+  file:
+    path: "{{ mongodb_backup_dir }}.tar.gz.sha256"
+    state: absent
+  changed_when: false
+
+- name: Display backup summary
+  debug:
+    msg:
+      - "========================================="
+      - "MongoDB Backup Completed Successfully"
+      - "========================================="
+      - "Timestamp: {{ mongodb_backup_ts }}"
+      - "Checksum: {{ mongodb_backup_checksum }}"
+      - "S3 Bucket: {{ mongodb_backup_s3_bucket }}"
+      - "S3 Prefix: {{ mongodb_backup_s3_prefix }}"
+      - "S3 Object: mongodb-backup-{{ mongodb_backup_ts }}.tar.gz"
+      - "========================================="

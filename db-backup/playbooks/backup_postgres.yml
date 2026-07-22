@@ -1,0 +1,13 @@
+---
+# Backup PostgreSQL to S3 (from standby/replica to avoid read load on primary)
+#
+# NOTE: Requires postgres_cluster and postgres_replicas groups in inventory.
+# See db-backup/README.md for inventory setup instructions.
+
+- name: Backup PostgreSQL to S3
+  hosts: postgres_cluster
+  become: yes
+  run_once: true
+  delegate_to: "{{ groups['postgres_replicas'][0] if 'postgres_replicas' in groups else groups['postgres_cluster'][1] | default(groups['postgres_cluster'][0]) }}"
+  roles:
+    - role: postgres_backup

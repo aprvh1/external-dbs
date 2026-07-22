@@ -1,0 +1,12 @@
+---
+# PostgreSQL Backup to S3
+
+postgres_backup_s3_bucket: ""
+postgres_backup_s3_prefix: "postgres-backups"
+postgres_backup_local_tmp_dir: "/tmp"
+
+# These are inherited from roles/postgres/defaults/main.yml:
+# - postgres_bin_dir
+# - postgres_port
+# - postgres_superuser
+# - postgres_superuser_password

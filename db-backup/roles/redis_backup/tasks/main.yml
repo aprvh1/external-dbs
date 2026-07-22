@@ -1,0 +1,101 @@
+---
+# Redis Backup to S3
+
+- name: Assert S3 bucket is set
+  assert:
+    that:
+      - redis_backup_s3_bucket | length > 0
+    fail_msg: "redis_backup_s3_bucket must be set"
+    success_msg: "Redis backup will be stored in s3://{{ redis_backup_s3_bucket }}/{{ redis_backup_s3_prefix }}/"
+
+- name: Verify AWS CLI is installed
+  command: command -v aws
+  changed_when: false
+  register: aws_cli_check
+
+- name: Create backup timestamp
+  set_fact:
+    redis_backup_ts: "{{ ansible_date_time.iso8601_basic_short }}"
+    redis_backup_file: "{{ redis_backup_local_tmp_dir }}/redis-dump-{{ ansible_date_time.iso8601_basic_short }}.rdb"
+
+- name: Get current LASTSAVE timestamp
+  command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} LASTSAVE"
+  register: lastsave_before
+  changed_when: false
+  no_log: true
+
+- name: Trigger BGSAVE
+  command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} BGSAVE"
+  register: bgsave_result
+  no_log: true
+  changed_when: true
+
+- name: Wait for BGSAVE to complete
+  command: "{{ redis_bin_dir }}/redis-cli -a {{ redis_requirepass }} LASTSAVE"
+  register: lastsave_after
+  until: lastsave_after.stdout | int > lastsave_before.stdout | int
+  retries: "{{ redis_backup_bgsave_timeout // 5 }}"
+  delay: 5
+  changed_when: false
+  no_log: true
+
+- name: Copy RDB file to backup location
+  command: cp {{ redis_data_dir }}/{{ redis_dbfilename }} {{ redis_backup_file }}
+  changed_when: true
+
+- name: Compress RDB file
+  command: gzip {{ redis_backup_file }}
+  register: gzip_result
+  changed_when: true
+
+- name: Calculate checksum
+  command: sha256sum {{ redis_backup_file }}.gz
+  register: checksum_result
+  changed_when: false
+
+- name: Extract checksum value
+  set_fact:
+    redis_backup_checksum: "{{ checksum_result.stdout.split()[0] }}"
+
+- name: Save checksum to file
+  copy:
+    content: "{{ checksum_result.stdout }}\n"
+    dest: "{{ redis_backup_file }}.gz.sha256"
+  changed_when: false
+
+- name: Upload backup archive to S3
+  command: >
+    aws s3 cp {{ redis_backup_file }}.gz
+    s3://{{ redis_backup_s3_bucket }}/{{ redis_backup_s3_prefix }}/redis-dump-{{ redis_backup_ts }}.rdb.gz
+  changed_when: true
+
+- name: Upload checksum to S3
+  command: >
+    aws s3 cp {{ redis_backup_file }}.gz.sha256
+    s3://{{ redis_backup_s3_bucket }}/{{ redis_backup_s3_prefix }}/redis-dump-{{ redis_backup_ts }}.rdb.gz.sha256
+  changed_when: true
+
+- name: Cleanup local backup file
+  file:
+    path: "{{ redis_backup_file }}.gz"
+    state: absent
+  changed_when: false
+
+- name: Cleanup local checksum file
+  file:
+    path: "{{ redis_backup_file }}.gz.sha256"
+    state: absent
+  changed_when: false
+
+- name: Display backup summary
+  debug:
+    msg:
+      - "========================================="
+      - "Redis Backup Completed Successfully"
+      - "========================================="
+      - "Timestamp: {{ redis_backup_ts }}"
+      - "Checksum: {{ redis_backup_checksum }}"
+      - "S3 Bucket: {{ redis_backup_s3_bucket }}"
+      - "S3 Prefix: {{ redis_backup_s3_prefix }}"
+      - "S3 Object: redis-dump-{{ redis_backup_ts }}.rdb.gz"
+      - "========================================="

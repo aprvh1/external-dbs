@@ -1,0 +1,87 @@
+---
+# PostgreSQL Backup to S3
+
+- name: Assert S3 bucket is set
+  assert:
+    that:
+      - postgres_backup_s3_bucket | length > 0
+    fail_msg: "postgres_backup_s3_bucket must be set"
+    success_msg: "PostgreSQL backup will be stored in s3://{{ postgres_backup_s3_bucket }}/{{ postgres_backup_s3_prefix }}/"
+
+- name: Verify AWS CLI is installed
+  command: command -v aws
+  changed_when: false
+  register: aws_cli_check
+
+- name: Create backup timestamp
+  set_fact:
+    postgres_backup_ts: "{{ ansible_date_time.iso8601_basic_short }}"
+    postgres_backup_file: "{{ postgres_backup_local_tmp_dir }}/postgres-full-{{ ansible_date_time.iso8601_basic_short }}.sql"
+
+- name: Execute pg_dumpall
+  shell: |
+    PGPASSWORD="{{ postgres_superuser_password }}" {{ postgres_bin_dir }}/pg_dumpall \
+      -U {{ postgres_superuser }} \
+      -h localhost \
+      -p {{ postgres_port }} > {{ postgres_backup_file }}
+  environment:
+    PGPASSWORD: "{{ postgres_superuser_password }}"
+  changed_when: true
+  no_log: true
+
+- name: Compress SQL dump
+  command: gzip {{ postgres_backup_file }}
+  register: gzip_result
+  changed_when: true
+
+- name: Calculate checksum
+  command: sha256sum {{ postgres_backup_file }}.gz
+  register: checksum_result
+  changed_when: false
+
+- name: Extract checksum value
+  set_fact:
+    postgres_backup_checksum: "{{ checksum_result.stdout.split()[0] }}"
+
+- name: Save checksum to file
+  copy:
+    content: "{{ checksum_result.stdout }}\n"
+    dest: "{{ postgres_backup_file }}.gz.sha256"
+  changed_when: false
+
+- name: Upload backup archive to S3
+  command: >
+    aws s3 cp {{ postgres_backup_file }}.gz
+    s3://{{ postgres_backup_s3_bucket }}/{{ postgres_backup_s3_prefix }}/postgres-full-{{ postgres_backup_ts }}.sql.gz
+  changed_when: true
+
+- name: Upload checksum to S3
+  command: >
+    aws s3 cp {{ postgres_backup_file }}.gz.sha256
+    s3://{{ postgres_backup_s3_bucket }}/{{ postgres_backup_s3_prefix }}/postgres-full-{{ postgres_backup_ts }}.sql.gz.sha256
+  changed_when: true
+
+- name: Cleanup local backup file
+  file:
+    path: "{{ postgres_backup_file }}.gz"
+    state: absent
+  changed_when: false
+
+- name: Cleanup local checksum file
+  file:
+    path: "{{ postgres_backup_file }}.gz.sha256"
+    state: absent
+  changed_when: false
+
+- name: Display backup summary
+  debug:
+    msg:
+      - "========================================="
+      - "PostgreSQL Backup Completed Successfully"
+      - "========================================="
+      - "Timestamp: {{ postgres_backup_ts }}"
+      - "Checksum: {{ postgres_backup_checksum }}"
+      - "S3 Bucket: {{ postgres_backup_s3_bucket }}"
+      - "S3 Prefix: {{ postgres_backup_s3_prefix }}"
+      - "S3 Object: postgres-full-{{ postgres_backup_ts }}.sql.gz"
+      - "========================================="

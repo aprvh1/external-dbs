@@ -1,0 +1,14 @@
+---
+# Redis Backup to S3
+
+redis_backup_s3_bucket: ""
+redis_backup_s3_prefix: "redis-backups"
+redis_backup_local_tmp_dir: "/tmp"
+redis_backup_bgsave_timeout: 300
+
+# These are inherited from roles/redis/defaults/main.yml:
+# - redis_bin_dir
+# - redis_data_dir
+# - redis_dbfilename
+# - redis_port
+# - redis_requirepass

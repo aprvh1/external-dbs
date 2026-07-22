@@ -1,0 +1,10 @@
+---
+# Backup Redis to S3 (from replica node to avoid BGSAVE latency on master)
+
+- name: Backup Redis to S3
+  hosts: redis_cluster
+  become: yes
+  run_once: true
+  delegate_to: "{{ groups['redis_replicas'][0] }}"
+  roles:
+    - role: redis_backup

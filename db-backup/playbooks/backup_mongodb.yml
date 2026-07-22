@@ -1,0 +1,10 @@
+---
+# Backup MongoDB to S3 (from secondary node to avoid load on primary)
+
+- name: Backup MongoDB to S3
+  hosts: mongodb_cluster
+  become: yes
+  run_once: true
+  delegate_to: "{{ groups['mongodb_secondary'][0] }}"
+  roles:
+    - role: mongodb_backup

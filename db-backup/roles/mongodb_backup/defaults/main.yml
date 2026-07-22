@@ -1,0 +1,12 @@
+---
+# MongoDB Backup to S3
+
+mongodb_backup_s3_bucket: ""
+mongodb_backup_s3_prefix: "mongodb-backups"
+mongodb_backup_local_tmp_dir: "/tmp"
+
+# These are inherited from roles/mongodb/defaults/main.yml:
+# - mongodb_admin_user
+# - mongodb_admin_password
+# - mongodb_bin_dir
+# - mongodb_port
